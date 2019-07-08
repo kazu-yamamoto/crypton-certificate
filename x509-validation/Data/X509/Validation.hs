@@ -35,14 +35,16 @@ module Data.X509.Validation (
     module Data.X509.Validation.Signature,
 ) where
 
-import Control.Applicative
 import Control.Monad (when)
 import Data.ASN1.Types
+import Data.ByteString (unpack)
 import Data.Char (toLower)
 import Data.Default
+import Data.Function ((&))
 import Data.Hourglass
 import Data.List
 import Data.Maybe
+import Data.Word (Word8)
 import Data.X509
 import Data.X509.CertificateStore
 import Data.X509.Validation.Cache
@@ -50,6 +52,8 @@ import Data.X509.Validation.Fingerprint
 import Data.X509.Validation.Signature
 import Data.X509.Validation.Types
 import System.Hourglass
+import Text.ParserCombinators.ReadP
+
 
 -- | Possible reason of certificate and chain failure.
 --
@@ -403,10 +407,39 @@ getNames cert = (commonName >>= asn1CharacterToString, altNames)
         unAltName (AltNameDNS s) = Just s
         unAltName _ = Nothing
 
+getIPs :: Certificate -> [[Word8]]
+getIPs cert = fromMaybe [] (toAltName <$> (extensionGet $ certExtensions cert))
+  where toAltName (ExtSubjectAltName names) = catMaybes $ map unAltName names
+          where unAltName (AltNameIP s) = Just $ unpack s
+                unAltName _             = Nothing
+
+parseIPAddress :: HostName -> Maybe [Word8]
+parseIPAddress host = case readP_to_S (ipv4Parser <* eof) host of
+                        [(ipv4, _)] -> Just ipv4
+                        _ -> Nothing
+
+ipv4Parser :: ReadP [Word8]
+ipv4Parser = do
+  let digits = munch1 (\c -> c >= '0' && c <= '9')
+  first <- digits
+  _ <- char '.'
+  second <- digits
+  _ <- char '.'
+  third <- digits
+  _ <- char '.'
+  fourth <- digits
+  [first, second, third, fourth]
+    & map (read :: String -> Integer) -- reading to Word8 would overflow without error
+    & map (\w -> if w <= 255
+                 then return (fromIntegral w)
+                 else pfail)
+    & sequence
+
 -- | Validate that the fqhn is matched by at least one name in the certificate.
 -- If the subjectAltname extension is present, then the certificate commonName
--- is ignored, and only the DNS names, if any, in the subjectAltName are
--- considered.  Otherwise, the commonName from the subjectDN is used.
+-- is ignored, and only the DNS names and IP Addresses, if any, in the
+-- subjectAltName are considered.  Otherwise, the commonName from the subjectDN
+-- is used.
 --
 -- Note that DNS names in the subjectAltName are in IDNA A-label form. If the
 -- destination hostname is a UTF-8 name, it must be provided to the TLS context
@@ -414,7 +447,11 @@ getNames cert = (commonName >>= asn1CharacterToString, altNames)
 validateCertificateName :: HostName -> Certificate -> [FailedReason]
 validateCertificateName fqhn cert
     | not $ null altNames =
-        findMatch [] $ map matchDomain altNames
+        case parseIPAddress fqhn of
+          Nothing -> findMatch [] $ map matchDomain altNames
+          Just ip -> if elem ip (getIPs cert)
+                     then []
+                     else [NameMismatch fqhn]
     | otherwise =
         case commonName of
             Nothing -> [NoCommonName]
