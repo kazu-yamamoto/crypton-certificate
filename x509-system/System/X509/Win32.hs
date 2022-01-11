@@ -21,6 +21,7 @@ import Data.X509
 import Data.X509.CertificateStore
 
 import System.Win32.Types
+import System.X509.Common (maybeSSLCertEnvOr)
 
 type HCertStore = Ptr Word8
 type PCCERT_Context = Ptr Word8
@@ -54,7 +55,7 @@ certFromContext cctx = do
     cbCertEncodedPos = pbCertEncodedPos + sizeOf (undefined :: Ptr (Ptr BYTE))
 
 getSystemCertificateStore :: IO CertificateStore
-getSystemCertificateStore = do
+getSystemCertificateStore = maybeSSLCertEnvOr $ do
     store <- certOpenSystemStore
     when (store == nullPtr) $ error "no store"
     certs <- loop store nullPtr
