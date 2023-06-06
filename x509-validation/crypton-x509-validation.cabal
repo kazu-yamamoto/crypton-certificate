@@ -10,7 +10,7 @@ Synopsis:            X.509 Certificate and CRL validation
 Build-Type:          Simple
 Category:            Data
 stability:           experimental
-Homepage:            http://github.com/vincenthz/hs-certificate
+Homepage:            https://github.com/kazu-yamamoto/crypton-certificate
 Cabal-Version:       >= 1.10
 
 Library

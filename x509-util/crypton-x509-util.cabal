@@ -10,7 +10,7 @@ Synopsis:            Utility for X509 certificate and chain
 Build-Type:          Simple
 Category:            Data
 stability:           experimental
-Homepage:            http://github.com/vincenthz/hs-certificate
+Homepage:            https://github.com/kazu-yamamoto/crypton-certificate
 Cabal-Version:       >= 1.10
 
 Executable           crypton-x509-util
