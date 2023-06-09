@@ -54,8 +54,8 @@ Test-Suite test-x509
                    , tasty-quickcheck
                    , hourglass
                    , asn1-types
-                   , x509
                    , crypton
+                   , crypton-x509
   ghc-options:       -Wall -fno-warn-orphans -fno-warn-missing-signatures
 
 source-repository head
