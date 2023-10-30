@@ -30,6 +30,7 @@ defaultSystemPaths =
     [ "/etc/ssl/certs/"                 -- linux
     , "/system/etc/security/cacerts/"   -- android
     , "/usr/local/share/certs/"         -- freebsd
+    , "/etc/openssl/certs/"             -- netbsd
     , "/etc/ssl/cert.pem"               -- openbsd
     ]
 
