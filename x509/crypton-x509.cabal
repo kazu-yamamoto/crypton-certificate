@@ -1,5 +1,5 @@
 Name:                crypton-x509
-version:             1.7.6
+version:             1.7.7
 Description:         X509 reader and writer. please see README
 License:             BSD3
 License-file:        LICENSE
