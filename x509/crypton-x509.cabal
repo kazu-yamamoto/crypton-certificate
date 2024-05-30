@@ -54,7 +54,7 @@ Test-Suite test-x509
                    , tasty-quickcheck
                    , hourglass
                    , asn1-types
-                   , x509
+                   , crypton-x509
                    , crypton
   ghc-options:       -Wall -fno-warn-orphans -fno-warn-missing-signatures
 
