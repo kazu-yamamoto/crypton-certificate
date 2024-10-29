@@ -22,7 +22,7 @@ module Data.X509.Validation.Cache
     ) where
 
 import Control.Concurrent
-import Data.Default.Class
+import Data.Default
 import Data.X509
 import Data.X509.Validation.Types
 import Data.X509.Validation.Fingerprint

@@ -34,7 +34,7 @@ module Data.X509.Validation
 
 import Control.Applicative
 import Control.Monad (when)
-import Data.Default.Class
+import Data.Default
 import Data.ASN1.Types
 import Data.Char (toLower)
 import Data.X509

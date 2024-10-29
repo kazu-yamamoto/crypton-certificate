@@ -10,7 +10,7 @@ import qualified Crypto.PubKey.DSA        as DSA
 import qualified Crypto.PubKey.ECC.Types  as ECC
 import qualified Crypto.PubKey.RSA.PSS    as PSS
 
-import Data.Default.Class
+import Data.Default
 import Data.Monoid
 import Data.String (fromString)
 import Data.X509
