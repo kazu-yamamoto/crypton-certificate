@@ -9,47 +9,61 @@
 --
 -- Define all the types necessary for the validation cache,
 -- and some simples instances of cache mechanism
-module Data.X509.Validation.Cache
-    (
+module Data.X509.Validation.Cache (
     -- * Cache for validation
-      ValidationCacheResult(..)
-    , ValidationCacheQueryCallback
-    , ValidationCacheAddCallback
-    , ValidationCache(..)
+    ValidationCacheResult (..),
+    ValidationCacheQueryCallback,
+    ValidationCacheAddCallback,
+    ValidationCache (..),
+
     -- * Simple instances of cache mechanism
-    , exceptionValidationCache
-    , tofuValidationCache
-    ) where
+    exceptionValidationCache,
+    tofuValidationCache,
+) where
 
 import Control.Concurrent
 import Data.Default
 import Data.X509
-import Data.X509.Validation.Types
 import Data.X509.Validation.Fingerprint
+import Data.X509.Validation.Types
 
 -- | The result of a cache query
-data ValidationCacheResult =
-      ValidationCachePass          -- ^ cache allow this fingerprint to go through
-    | ValidationCacheDenied String -- ^ cache denied this fingerprint for further validation
-    | ValidationCacheUnknown       -- ^ unknown fingerprint in cache
-    deriving (Show,Eq)
+data ValidationCacheResult
+    = -- | cache allow this fingerprint to go through
+      ValidationCachePass
+    | -- | cache denied this fingerprint for further validation
+      ValidationCacheDenied String
+    | -- | unknown fingerprint in cache
+      ValidationCacheUnknown
+    deriving (Show, Eq)
 
 -- | Validation cache query callback type
-type ValidationCacheQueryCallback = ServiceID          -- ^ connection's identification
-                                 -> Fingerprint        -- ^ fingerprint of the leaf certificate
-                                 -> Certificate        -- ^ leaf certificate
-                                 -> IO ValidationCacheResult -- ^ return if the operation is succesful or not
+type ValidationCacheQueryCallback =
+    ServiceID
+    -- ^ connection's identification
+    -> Fingerprint
+    -- ^ fingerprint of the leaf certificate
+    -> Certificate
+    -- ^ leaf certificate
+    -> IO ValidationCacheResult
+    -- ^ return if the operation is succesful or not
 
 -- | Validation cache callback type
-type ValidationCacheAddCallback = ServiceID   -- ^ connection's identification
-                               -> Fingerprint -- ^ fingerprint of the leaf certificate
-                               -> Certificate -- ^ leaf certificate
-                               -> IO ()
+type ValidationCacheAddCallback =
+    ServiceID
+    -- ^ connection's identification
+    -> Fingerprint
+    -- ^ fingerprint of the leaf certificate
+    -> Certificate
+    -- ^ leaf certificate
+    -> IO ()
 
 -- | All the callbacks needed for querying and adding to the cache.
 data ValidationCache = ValidationCache
-    { cacheQuery :: ValidationCacheQueryCallback -- ^ cache querying callback
-    , cacheAdd   :: ValidationCacheAddCallback   -- ^ cache adding callback
+    { cacheQuery :: ValidationCacheQueryCallback
+    -- ^ cache querying callback
+    , cacheAdd :: ValidationCacheAddCallback
+    -- ^ cache adding callback
     }
 
 instance Default ValidationCache where
@@ -70,8 +84,9 @@ instance Default ValidationCache where
 -- another cache mechanism need to be use.
 exceptionValidationCache :: [(ServiceID, Fingerprint)] -> ValidationCache
 exceptionValidationCache fingerprints =
-    ValidationCache (queryListCallback fingerprints)
-                    (\_ _ _ -> return ())
+    ValidationCache
+        (queryListCallback fingerprints)
+        (\_ _ _ -> return ())
 
 -- | Trust on first use (TOFU) cache with an optional list of exceptions
 --
@@ -79,20 +94,27 @@ exceptionValidationCache fingerprints =
 -- each succesfull validation it does add the fingerprint
 -- to the database. This prevent any further modification of the
 -- fingerprint for the remaining
-tofuValidationCache :: [(ServiceID, Fingerprint)] -- ^ a list of exceptions
-                    -> IO ValidationCache
+tofuValidationCache
+    :: [(ServiceID, Fingerprint)]
+    -- ^ a list of exceptions
+    -> IO ValidationCache
 tofuValidationCache fingerprints = do
     l <- newMVar fingerprints
-    return $ ValidationCache (\s f c -> readMVar l >>= \list -> (queryListCallback list) s f c)
-                             (\s f _ -> modifyMVar_ l (\list -> return ((s,f) : list)))
+    return $
+        ValidationCache
+            (\s f c -> readMVar l >>= \list -> (queryListCallback list) s f c)
+            (\s f _ -> modifyMVar_ l (\list -> return ((s, f) : list)))
 
 -- | a cache query function working on list.
 -- don't use when the list grows a lot.
 queryListCallback :: [(ServiceID, Fingerprint)] -> ValidationCacheQueryCallback
 queryListCallback list = query
-  where query serviceID fingerprint _ = return $
-            case lookup serviceID list of
-                Nothing                   -> ValidationCacheUnknown
-                Just f | fingerprint == f -> ValidationCachePass
-                       | otherwise        -> ValidationCacheDenied (show serviceID ++ " expected " ++ show f ++ " but got: " ++ show fingerprint)
-
+  where
+    query serviceID fingerprint _ = return $
+        case lookup serviceID list of
+            Nothing -> ValidationCacheUnknown
+            Just f
+                | fingerprint == f -> ValidationCachePass
+                | otherwise ->
+                    ValidationCacheDenied
+                        (show serviceID ++ " expected " ++ show f ++ " but got: " ++ show fingerprint)

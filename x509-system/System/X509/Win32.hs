@@ -1,23 +1,24 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE ForeignFunctionInterface #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE CPP #-}
-module System.X509.Win32
-    ( getSystemCertificateStore
-    ) where
 
+module System.X509.Win32 (
+    getSystemCertificateStore,
+) where
+
+import Data.Word
 import Foreign.Ptr
 import Foreign.Storable
-import Data.Word
 
-import Control.Monad (when)
 import Control.Applicative
 import Control.Exception (catch)
+import Control.Monad (when)
 
 import qualified Data.ByteString.Internal as B
 
+import Data.ASN1.Error
 import Data.X509
 import Data.X509.CertificateStore
-import Data.ASN1.Error
 
 import System.Win32.Types
 
@@ -30,7 +31,8 @@ foreign import stdcall unsafe "CertCloseStore"
     c_CertCloseStore :: HCertStore -> DWORD -> IO ()
 
 foreign import stdcall unsafe "CertEnumCertificatesInStore"
-    c_CertEnumCertificatesInStore :: HCertStore -> PCCERT_Context -> IO PCCERT_Context
+    c_CertEnumCertificatesInStore
+        :: HCertStore -> PCCERT_Context -> IO PCCERT_Context
 
 certOpenSystemStore :: IO HCertStore
 certOpenSystemStore = withTString "ROOT" $ \cstr ->
@@ -38,17 +40,18 @@ certOpenSystemStore = withTString "ROOT" $ \cstr ->
 
 certFromContext :: PCCERT_Context -> IO (Either String SignedCertificate)
 certFromContext cctx = do
-    ty  <- peek (castPtr cctx :: Ptr DWORD)
-    p   <- peek (castPtr (cctx `plusPtr` pbCertEncodedPos) :: Ptr (Ptr BYTE))
+    ty <- peek (castPtr cctx :: Ptr DWORD)
+    p <- peek (castPtr (cctx `plusPtr` pbCertEncodedPos) :: Ptr (Ptr BYTE))
     len <- peek (castPtr (cctx `plusPtr` cbCertEncodedPos) :: Ptr DWORD)
     process ty p len
-  where process 1 p len = do
-            b <- B.create (fromIntegral len) $ \dst -> B.memcpy dst p (fromIntegral len)
-            return $ decodeSignedObject b
-        process ty _ _ =
-            return $ Left ("windows certificate store: not supported type: " ++ show ty)
-        pbCertEncodedPos = alignment (undefined :: Ptr (Ptr BYTE))
-        cbCertEncodedPos = pbCertEncodedPos + sizeOf (undefined :: Ptr (Ptr BYTE))
+  where
+    process 1 p len = do
+        b <- B.create (fromIntegral len) $ \dst -> B.memcpy dst p (fromIntegral len)
+        return $ decodeSignedObject b
+    process ty _ _ =
+        return $ Left ("windows certificate store: not supported type: " ++ show ty)
+    pbCertEncodedPos = alignment (undefined :: Ptr (Ptr BYTE))
+    cbCertEncodedPos = pbCertEncodedPos + sizeOf (undefined :: Ptr (Ptr BYTE))
 
 getSystemCertificateStore :: IO CertificateStore
 getSystemCertificateStore = do
@@ -57,13 +60,15 @@ getSystemCertificateStore = do
     certs <- loop store nullPtr
     c_CertCloseStore store 0
     return (makeCertificateStore certs)
-  where loop st ptr = do
-            r <- c_CertEnumCertificatesInStore st ptr
-            if r == nullPtr
-                then return []
-                else do
+  where
+    loop st ptr = do
+        r <- c_CertEnumCertificatesInStore st ptr
+        if r == nullPtr
+            then return []
+            else
+                do
                     ecert <- certFromContext r
                     case ecert of
-                        Left _     -> loop st r
+                        Left _ -> loop st r
                         Right cert -> (cert :) <$> (loop st r)
                     `catch` \(_ :: ASN1Error) -> loop st r

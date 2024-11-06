@@ -4,19 +4,19 @@
 -- Maintainer  : Vincent Hanquez <vincent@snarc.org>
 -- Stability   : experimental
 -- Portability : unknown
---
-module Data.X509.Internal
-    ( module Data.ASN1.Parse
-    , asn1Container
-    , OID
-    -- * error handling
-    , ErrT
-    , runErrT
-    ) where
+module Data.X509.Internal (
+    module Data.ASN1.Parse,
+    asn1Container,
+    OID,
 
-import Data.ASN1.Types
-import Data.ASN1.Parse
+    -- * error handling
+    ErrT,
+    runErrT,
+) where
+
 import Control.Monad.Trans.Except
+import Data.ASN1.Parse
+import Data.ASN1.Types
 
 runErrT :: ExceptT e m a -> m (Either e a)
 runErrT = runExceptT

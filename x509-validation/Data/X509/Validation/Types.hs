@@ -6,10 +6,10 @@
 -- Portability : unknown
 --
 -- X.509 Validation types
-module Data.X509.Validation.Types
-    ( ServiceID
-    , HostName
-    ) where
+module Data.X509.Validation.Types (
+    ServiceID,
+    HostName,
+) where
 
 import Data.ByteString (ByteString)
 
@@ -25,5 +25,4 @@ type HostName = String
 -- certificate on 2 differents ports (443 and 995) for the same host.
 --
 -- for TCP connection, it's recommended to use: :port, or :service for the suffix.
---
 type ServiceID = (HostName, ByteString)
