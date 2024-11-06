@@ -15,6 +15,7 @@ module Data.X509.Validation.Cache (
     ValidationCacheQueryCallback,
     ValidationCacheAddCallback,
     ValidationCache (..),
+    defaultValidationCache,
 
     -- * Simple instances of cache mechanism
     exceptionValidationCache,
@@ -66,8 +67,11 @@ data ValidationCache = ValidationCache
     -- ^ cache adding callback
     }
 
+defaultValidationCache :: ValidationCache
+defaultValidationCache = exceptionValidationCache []
+
 instance Default ValidationCache where
-    def = exceptionValidationCache []
+    def = defaultValidationCache
 
 -- | create a simple constant cache that list exceptions to the certification
 -- validation. Typically this is use to allow self-signed certificates for
