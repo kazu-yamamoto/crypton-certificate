@@ -33,12 +33,9 @@ readSignedObjectFromMemory
     :: (ASN1Object a, Eq a, Show a)
     => B.ByteString
     -> [X509.SignedExact a]
-readSignedObjectFromMemory = either (const []) (foldl pemToSigned []) . pemParseBS
+readSignedObjectFromMemory = either (const []) decodePems . pemParseBS
   where
-    pemToSigned acc pem =
-        case X509.decodeSignedObject $ pemContent pem of
-            Left _ -> acc
-            Right obj -> obj : acc
+    decodePems pems = [ obj | pem <- pems, Right obj <- [X509.decodeSignedObject $ pemContent pem] ]
 
 pemToKey :: [Maybe X509.PrivKey] -> PEM -> [Maybe X509.PrivKey]
 pemToKey acc pem =
