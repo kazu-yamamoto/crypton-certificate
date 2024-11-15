@@ -27,21 +27,21 @@ import qualified Data.X509 as X509
 import Data.X509.EC as X509
 
 readKeyFileFromMemory :: B.ByteString -> [X509.PrivKey]
-readKeyFileFromMemory = either (const []) (catMaybes . foldl pemToKey []) . pemParseBS
+readKeyFileFromMemory = either (const []) (catMaybes . foldr pemToKey []) . pemParseBS
 
 readSignedObjectFromMemory
     :: (ASN1Object a, Eq a, Show a)
     => B.ByteString
     -> [X509.SignedExact a]
-readSignedObjectFromMemory = either (const []) (foldl pemToSigned []) . pemParseBS
+readSignedObjectFromMemory = either (const []) (foldr pemToSigned []) . pemParseBS
   where
-    pemToSigned acc pem =
+    pemToSigned pem acc =
         case X509.decodeSignedObject $ pemContent pem of
             Left _ -> acc
             Right obj -> obj : acc
 
-pemToKey :: [Maybe X509.PrivKey] -> PEM -> [Maybe X509.PrivKey]
-pemToKey acc pem =
+pemToKey :: PEM -> [Maybe X509.PrivKey] -> [Maybe X509.PrivKey]
+pemToKey pem acc =
     case decodeASN1' BER (pemContent pem) of
         Left _ -> acc
         Right asn1 ->

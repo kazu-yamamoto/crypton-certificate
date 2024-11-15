@@ -40,4 +40,4 @@ readSignedObject filepath = decodePEMs <$> readPEMs filepath
 
 -- | return all the private keys that were successfully read from a file.
 readKeyFile :: FilePath -> IO [X509.PrivKey]
-readKeyFile path = catMaybes . foldl pemToKey [] <$> readPEMs path
+readKeyFile path = catMaybes . foldr pemToKey [] <$> readPEMs path

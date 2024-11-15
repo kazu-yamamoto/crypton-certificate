@@ -382,7 +382,7 @@ doKeyMain files = do
     pems <- readPEMFile (head files)
     forM_ pems $ \pem -> do
         let content = either (error . show) id $ decodeASN1' BER (pemContent pem)
-            privkey = catMaybes $ pemToKey [] pem
+            privkey = catMaybes $ pemToKey pem []
         case privkey of
             [X509.PrivKeyRSA k] ->
                 putStrLn "RSA KEY" >> putStrLn (showRSAKey k)
