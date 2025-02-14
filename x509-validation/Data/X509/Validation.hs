@@ -8,6 +8,10 @@
 -- X.509 Certificate checks and validations routines
 --
 -- Follows RFC5280 / RFC6818
+
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ViewPatterns #-}
+
 module Data.X509.Validation (
     module Data.X509.Validation.Types,
     Fingerprint (..),
@@ -41,11 +45,10 @@ import Data.Bits
 import Data.ByteString (unpack)
 import Data.Char (toLower)
 import Data.Default
-import Data.Function ((&))
 import Data.Hourglass
+import Data.IP (IPv4, IPv6, toIPv4, toIPv6)
 import Data.List
 import Data.Maybe
-import Data.Word (Word16, Word8)
 import Data.Word (Word8)
 import Data.X509
 import Data.X509.CertificateStore
@@ -53,11 +56,8 @@ import Data.X509.Validation.Cache
 import Data.X509.Validation.Fingerprint
 import Data.X509.Validation.Signature
 import Data.X509.Validation.Types
-import Foundation.Network.IPv4 as IPv4 (ipv4Parser, IPv4, fromTuple)
-import Foundation.Network.IPv6 as IPv6 (ipv6Parser, IPv6, fromTuple)
-import Foundation.Parser
 import System.Hourglass
-import Text.ParserCombinators.ReadP
+import Text.Read (readMaybe)
 
 -- | Possible reason of certificate and chain failure.
 --
@@ -420,30 +420,22 @@ getIPs cert = fromMaybe [] (toAltName <$> (extensionGet $ certExtensions cert))
   where toAltName (ExtSubjectAltName names) = catMaybes $ map unAltName names
 
         unAltName (AltNameIP s) = case unpack s of
-                                    [a,b,c,d] -> Just $ IPv4Address $ IPv4.fromTuple (a,b,c,d)
-                                    [a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p] ->
-                                      Just $ IPv6Address $ IPv6.fromTuple ( fuse a b, fuse c d
-                                                                          , fuse e f, fuse g h
-                                                                          , fuse i j, fuse k l
-                                                                          , fuse m n, fuse o p)
-                                    _ -> Nothing
-        unAltName _             = Nothing
+          [a,b,c,d] -> Just $ IPv4Address $ toIPv4 $ fmap fromIntegral [a,b,c,d]
+          [a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p] ->
+            Just $ IPv6Address $ toIPv6 [ fuse a b, fuse c d
+                                        , fuse e f, fuse g h
+                                        , fuse i j, fuse k l
+                                        , fuse m n, fuse o p ]
+          _ -> Nothing
+        unAltName _ = Nothing
 
-        fuse :: Word8 -> Word8 -> Word16
+        fuse :: Word8 -> Word8 -> Int
         fuse a b = shiftL (fromIntegral a) 8 .|. (fromIntegral b)
 
 parseIPAddress :: HostName -> Maybe IPAddress
-parseIPAddress host = either (const Nothing) Just
-                      $ parseOnly (parser <* endOfInput) host
-                      where
-                        parser = IPv4Address <$> ipv4Parser
-                                     <|> IPv6Address <$> ipv6Parser
-
-                        endOfInput = do
-                          nextChar <- peek
-                          case nextChar of
-                            Nothing -> return ()
-                            _ -> reportError $ Satisfy $ Just "expected end of input"
+parseIPAddress (readMaybe -> Just ipV4) = Just $ IPv4Address ipV4
+parseIPAddress (readMaybe -> Just ipV6) = Just $ IPv6Address ipV6
+parseIPAddress _ = Nothing
 
 -- | Validate that the fqhn is matched by at least one name in the certificate.
 -- If the subjectAltname extension is present, then the certificate commonName
