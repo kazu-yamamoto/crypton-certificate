@@ -10,7 +10,3 @@ packages:
 
 nix:
   pure: false
-
-# extra-deps:
-# - asn1-encoding-0.9.6@sha256:784e936495b1408a7831ff000bef25993b910ca9f008f69e1590da80a9d40f7b,1988
-# - asn1-parse-0.9.5@sha256:77c0126d63070df2d82cb4cfa4febb26c4e280f6d854bc778c2fa4d80ce692b8,976
