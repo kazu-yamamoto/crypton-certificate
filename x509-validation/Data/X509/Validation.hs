@@ -1,3 +1,6 @@
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ViewPatterns #-}
+
 -- |
 -- Module      : Data.X509.Validation
 -- License     : BSD-style
@@ -8,10 +11,6 @@
 -- X.509 Certificate checks and validations routines
 --
 -- Follows RFC5280 / RFC6818
-
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE ViewPatterns #-}
-
 module Data.X509.Validation (
     module Data.X509.Validation.Types,
     Fingerprint (..),
@@ -411,26 +410,36 @@ getNames cert = (commonName >>= asn1CharacterToString, altNames)
         unAltName (AltNameDNS s) = Just s
         unAltName _ = Nothing
 
-data IPAddress = IPv4Address IPv4
-               | IPv6Address IPv6
-  deriving Eq
+data IPAddress
+    = IPv4Address IPv4
+    | IPv6Address IPv6
+    deriving (Eq)
 
 getIPs :: Certificate -> [IPAddress]
 getIPs cert = fromMaybe [] (toAltName <$> (extensionGet $ certExtensions cert))
-  where toAltName (ExtSubjectAltName names) = catMaybes $ map unAltName names
+  where
+    toAltName (ExtSubjectAltName names) = catMaybes $ map unAltName names
 
-        unAltName (AltNameIP s) = case unpack s of
-          [a,b,c,d] -> Just $ IPv4Address $ toIPv4 $ fmap fromIntegral [a,b,c,d]
-          [a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p] ->
-            Just $ IPv6Address $ toIPv6 [ fuse a b, fuse c d
-                                        , fuse e f, fuse g h
-                                        , fuse i j, fuse k l
-                                        , fuse m n, fuse o p ]
-          _ -> Nothing
-        unAltName _ = Nothing
+    unAltName (AltNameIP s) = case unpack s of
+        [a, b, c, d] -> Just $ IPv4Address $ toIPv4 $ fmap fromIntegral [a, b, c, d]
+        [a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p] ->
+            Just $
+                IPv6Address $
+                    toIPv6
+                        [ fuse a b
+                        , fuse c d
+                        , fuse e f
+                        , fuse g h
+                        , fuse i j
+                        , fuse k l
+                        , fuse m n
+                        , fuse o p
+                        ]
+        _ -> Nothing
+    unAltName _ = Nothing
 
-        fuse :: Word8 -> Word8 -> Int
-        fuse a b = shiftL (fromIntegral a) 8 .|. (fromIntegral b)
+    fuse :: Word8 -> Word8 -> Int
+    fuse a b = shiftL (fromIntegral a) 8 .|. (fromIntegral b)
 
 parseIPAddress :: HostName -> Maybe IPAddress
 parseIPAddress (readMaybe -> Just ipV4) = Just $ IPv4Address ipV4
@@ -450,10 +459,11 @@ validateCertificateName :: HostName -> Certificate -> [FailedReason]
 validateCertificateName fqhn cert
     | not $ null altNames =
         case parseIPAddress fqhn of
-          Nothing -> findMatch [] $ map matchDomain altNames
-          Just ip -> if elem ip (getIPs cert)
-                     then []
-                     else [NameMismatch fqhn]
+            Nothing -> findMatch [] $ map matchDomain altNames
+            Just ip ->
+                if elem ip (getIPs cert)
+                    then []
+                    else [NameMismatch fqhn]
     | otherwise =
         case commonName of
             Nothing -> [NoCommonName]
