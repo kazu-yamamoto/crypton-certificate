@@ -1,5 +1,5 @@
 Name:                crypton-x509-store
-version:             1.6.9
+version:             1.6.10
 Description:         X.509 collection accessing and storing methods for certificate, crl, exception list
 License:             BSD3
 License-file:        LICENSE
