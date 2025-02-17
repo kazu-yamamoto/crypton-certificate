@@ -1,3 +1,6 @@
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ViewPatterns #-}
+
 -- |
 -- Module      : Data.X509.Validation
 -- License     : BSD-style
@@ -35,14 +38,17 @@ module Data.X509.Validation (
     module Data.X509.Validation.Signature,
 ) where
 
-import Control.Applicative
 import Control.Monad (when)
 import Data.ASN1.Types
+import Data.Bits
+import Data.ByteString (unpack)
 import Data.Char (toLower)
 import Data.Default
 import Data.Hourglass
+import Data.IP (IPv4, IPv6, toIPv4, toIPv6)
 import Data.List
 import Data.Maybe
+import Data.Word (Word8)
 import Data.X509
 import Data.X509.CertificateStore
 import Data.X509.Validation.Cache
@@ -50,6 +56,7 @@ import Data.X509.Validation.Fingerprint
 import Data.X509.Validation.Signature
 import Data.X509.Validation.Types
 import System.Hourglass
+import Text.Read (readMaybe)
 
 -- | Possible reason of certificate and chain failure.
 --
@@ -403,10 +410,47 @@ getNames cert = (commonName >>= asn1CharacterToString, altNames)
         unAltName (AltNameDNS s) = Just s
         unAltName _ = Nothing
 
+data IPAddress
+    = IPv4Address IPv4
+    | IPv6Address IPv6
+    deriving (Eq)
+
+getIPs :: Certificate -> [IPAddress]
+getIPs cert = fromMaybe [] (toAltName <$> (extensionGet $ certExtensions cert))
+  where
+    toAltName (ExtSubjectAltName names) = catMaybes $ map unAltName names
+
+    unAltName (AltNameIP s) = case unpack s of
+        [a, b, c, d] -> Just $ IPv4Address $ toIPv4 $ fmap fromIntegral [a, b, c, d]
+        [a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p] ->
+            Just $
+                IPv6Address $
+                    toIPv6
+                        [ fuse a b
+                        , fuse c d
+                        , fuse e f
+                        , fuse g h
+                        , fuse i j
+                        , fuse k l
+                        , fuse m n
+                        , fuse o p
+                        ]
+        _ -> Nothing
+    unAltName _ = Nothing
+
+    fuse :: Word8 -> Word8 -> Int
+    fuse a b = shiftL (fromIntegral a) 8 .|. (fromIntegral b)
+
+parseIPAddress :: HostName -> Maybe IPAddress
+parseIPAddress (readMaybe -> Just ipV4) = Just $ IPv4Address ipV4
+parseIPAddress (readMaybe -> Just ipV6) = Just $ IPv6Address ipV6
+parseIPAddress _ = Nothing
+
 -- | Validate that the fqhn is matched by at least one name in the certificate.
 -- If the subjectAltname extension is present, then the certificate commonName
--- is ignored, and only the DNS names, if any, in the subjectAltName are
--- considered.  Otherwise, the commonName from the subjectDN is used.
+-- is ignored, and only the DNS names and IP Addresses, if any, in the
+-- subjectAltName are considered.  Otherwise, the commonName from the subjectDN
+-- is used.
 --
 -- Note that DNS names in the subjectAltName are in IDNA A-label form. If the
 -- destination hostname is a UTF-8 name, it must be provided to the TLS context
@@ -414,7 +458,12 @@ getNames cert = (commonName >>= asn1CharacterToString, altNames)
 validateCertificateName :: HostName -> Certificate -> [FailedReason]
 validateCertificateName fqhn cert
     | not $ null altNames =
-        findMatch [] $ map matchDomain altNames
+        case parseIPAddress fqhn of
+            Nothing -> findMatch [] $ map matchDomain altNames
+            Just ip ->
+                if elem ip (getIPs cert)
+                    then []
+                    else [NameMismatch fqhn]
     | otherwise =
         case commonName of
             Nothing -> [NoCommonName]
