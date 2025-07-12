@@ -26,7 +26,7 @@ Executable           crypton-x509-util
                    , crypton-x509-validation >= 1.6.3
                    , asn1-types >= 0.3
                    , asn1-encoding
-                   , pem
+                   , crypton-pem
                    , directory
                    , hourglass
                    , memory
