@@ -2,6 +2,7 @@
 
 module Data.X509.CertificateStore (
     CertificateStore,
+    isEmptyCertificateStore,
     makeCertificateStore,
     readCertificateStore,
     readCertificates,
@@ -37,6 +38,11 @@ import System.FilePath ((</>))
 data CertificateStore
     = CertificateStore (M.Map DistinguishedName SignedCertificate)
     | CertificateStores [CertificateStore]
+
+isEmptyCertificateStore :: CertificateStore -> Bool
+isEmptyCertificateStore (CertificateStore m) = M.null m
+isEmptyCertificateStore (CertificateStores []) = True
+isEmptyCertificateStore _ = False
 
 #if MIN_VERSION_base(4,9,0)
 instance Semigroup CertificateStore where
