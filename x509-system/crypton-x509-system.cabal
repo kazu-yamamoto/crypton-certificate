@@ -1,5 +1,5 @@
 Name:                crypton-x509-system
-version:             1.6.7
+version:             1.7.0
 Synopsis:            Handle per-operating-system X.509 accessors and storage
 Description:         System X.509 handling for accessing operating system dependents store and other storage methods
 License:             BSD3
@@ -23,8 +23,8 @@ Library
                    , filepath
                    , process
                    , pem >= 0.1 && < 0.3
-                   , crypton-x509 >= 1.6
-                   , crypton-x509-store >= 1.6.2
+                   , crypton-x509 >= 1.8
+                   , crypton-x509-store >= 1.7.0
   Exposed-modules:   System.X509
                      System.X509.Unix
                      System.X509.MacOS

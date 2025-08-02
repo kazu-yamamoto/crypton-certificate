@@ -1,5 +1,5 @@
 Name:                crypton-x509-store
-version:             1.6.11
+version:             1.7.0
 Description:         X.509 collection accessing and storing methods for certificate, crl, exception list
 License:             BSD3
 License-file:        LICENSE
@@ -22,10 +22,10 @@ Library
                    , directory
                    , filepath
                    , pem >= 0.1 && < 0.3
-                   , asn1-types >= 0.3 && < 0.4
-                   , asn1-encoding >= 0.9 && < 0.10
+                   , crypton-asn1-types >= 0.4.1 && < 0.5
+                   , crypton-asn1-encoding >= 0.10.0 && < 0.11
                    , crypton
-                   , crypton-x509 >= 1.7.2
+                   , crypton-x509 >= 1.8.0
   Exposed-modules:   Data.X509.CertificateStore
                      Data.X509.File
                      Data.X509.Memory
@@ -40,7 +40,7 @@ Test-Suite test-x509-store
                    , bytestring
                    , tasty
                    , tasty-hunit
-                   , crypton-x509
+                   , crypton-x509 >= 1.8.0
                    , crypton-x509-store
   ghc-options:       -Wall
 

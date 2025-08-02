@@ -1,5 +1,5 @@
 Name:                crypton-x509-util
-version:             1.6.6
+version:             1.6.6.1
 Description:         utility to parse, show, validate, sign and produce X509 certificates and chain.
 License:             BSD3
 License-file:        LICENSE
@@ -20,15 +20,15 @@ Executable           crypton-x509-util
   Buildable:         True
   Build-depends:     base >= 3 && < 5
                    , bytestring
-                   , crypton-x509 >= 1.7.1
-                   , crypton-x509-store
-                   , crypton-x509-system
-                   , crypton-x509-validation >= 1.6.3
-                   , asn1-types >= 0.3
-                   , asn1-encoding
+                   , crypton-x509 >= 1.8.0
+                   , crypton-x509-store >= 1.7.0
+                   , crypton-x509-system >= 1.7.0
+                   , crypton-x509-validation >= 1.7.0
+                   , crypton-asn1-types >= 0.4.1 && < 0.5
+                   , crypton-asn1-encoding >= 0.10.0 && < 0.11
                    , pem
                    , directory
-                   , hourglass
+                   , time-hourglass
                    , memory
                    , crypton
 
