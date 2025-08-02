@@ -1,5 +1,5 @@
 Name:                crypton-x509
-version:             1.7.7
+version:             1.8.0
 Description:         X509 reader and writer. please see README
 License:             BSD3
 License-file:        LICENSE
@@ -20,11 +20,11 @@ Library
                    , memory
                    , transformers >= 0.4
                    , containers
-                   , hourglass
+                   , time-hourglass
                    , pem >= 0.1
-                   , asn1-types >= 0.3.1 && < 0.4
-                   , asn1-encoding >= 0.9 && < 0.10
-                   , asn1-parse >= 0.9.3 && < 0.10
+                   , crypton-asn1-types >= 0.4.1 && < 0.5
+                   , crypton-asn1-encoding >= 0.10.0 && < 0.11
+                   , crypton-asn1-parse >= 0.10.0 && < 0.11
                    , crypton >= 0.24
   Exposed-modules:   Data.X509
                      Data.X509.EC
@@ -52,8 +52,8 @@ Test-Suite test-x509
                    , mtl
                    , tasty
                    , tasty-quickcheck
-                   , hourglass
-                   , asn1-types
+                   , time-hourglass
+                   , crypton-asn1-types >= 0.4.1 && < 0.5
                    , crypton-x509
                    , crypton
   ghc-options:       -Wall -fno-warn-orphans -fno-warn-missing-signatures
