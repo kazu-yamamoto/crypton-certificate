@@ -26,6 +26,8 @@ Library
                    , asn1-encoding >= 0.9 && < 0.10
                    , crypton
                    , crypton-x509 >= 1.7.2
+  if !os(windows)
+      Build-Depends: unix
   Exposed-modules:   Data.X509.CertificateStore
                      Data.X509.File
                      Data.X509.Memory
