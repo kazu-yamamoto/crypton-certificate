@@ -22,7 +22,7 @@ Library
                    , containers
                    , hourglass
                    , data-default
-                   , pem >= 0.1
+                   , crypton-pem >= 0.2.4
                    , asn1-types >= 0.3 && < 0.4
                    , asn1-encoding >= 0.9 && < 0.10
                    , crypton-x509 >= 1.7.5
