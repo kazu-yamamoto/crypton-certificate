@@ -27,7 +27,7 @@ Library
                    , crypton
                    , crypton-x509 >= 1.7.2
   if !os(windows)
-      Build-Depends: unix
+      Build-Depends: unix >= 2.8
   Exposed-modules:   Data.X509.CertificateStore
                      Data.X509.File
                      Data.X509.Memory
