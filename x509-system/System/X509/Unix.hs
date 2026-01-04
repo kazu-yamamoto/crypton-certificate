@@ -17,6 +17,7 @@ module System.X509.Unix (
 
 import Data.X509.CertificateStore
 import System.Environment (getEnv)
+import System.X509.Common (maybeSSLCertEnvOr)
 
 import Control.Applicative ((<$>))
 import qualified Control.Exception as E
@@ -36,7 +37,7 @@ envPathOverride :: String
 envPathOverride = "SYSTEM_CERTIFICATE_PATH"
 
 getSystemCertificateStore :: IO CertificateStore
-getSystemCertificateStore = mconcat . catMaybes <$> (getSystemPaths >>= mapM readCertificateStore)
+getSystemCertificateStore = maybeSSLCertEnvOr (mconcat . catMaybes <$> (getSystemPaths >>= mapM readCertificateStore))
 
 getSystemPaths :: IO [FilePath]
 getSystemPaths = E.catch ((: []) <$> getEnv envPathOverride) inDefault
