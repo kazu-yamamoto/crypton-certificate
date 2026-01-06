@@ -27,7 +27,8 @@ import Data.Monoid (mconcat)
 
 defaultSystemPaths :: [FilePath]
 defaultSystemPaths =
-    [ "/etc/ssl/certs/" -- linux
+    [ "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem" -- fedora
+    , "/etc/ssl/certs/" -- linux
     , "/system/etc/security/cacerts/" -- android
     , "/usr/local/share/certs/" -- freebsd
     , "/etc/ssl/cert.pem" -- openbsd
