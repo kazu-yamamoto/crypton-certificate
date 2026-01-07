@@ -35,7 +35,8 @@ readSignedObjectFromMemory
     -> [X509.SignedExact a]
 readSignedObjectFromMemory = either (const []) decodePems . pemParseBS
   where
-    decodePems pems = [ obj | pem <- pems, Right obj <- [X509.decodeSignedObject $ pemContent pem] ]
+    decodePems pems =
+        [obj | pem <- pems, Right obj <- [X509.decodeSignedObject $ pemContent pem]]
 
 pemToKey :: [Maybe X509.PrivKey] -> PEM -> [Maybe X509.PrivKey]
 pemToKey acc pem =

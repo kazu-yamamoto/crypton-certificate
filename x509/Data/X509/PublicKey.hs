@@ -105,25 +105,25 @@ instance ASN1Object PubKey where
                     : BitString bits
                     : End Sequence
                     : xs2 ->
-                    decodeASN1Err
-                        "DSA"
-                        bits
-                        xs2
-                        ( \l -> case l of
-                            [IntVal dsapub] ->
-                                let pubkey =
-                                        DSA.PublicKey
-                                            { DSA.public_params =
-                                                DSA.Params
-                                                    { DSA.params_p = p
-                                                    , DSA.params_q = q
-                                                    , DSA.params_g = g
-                                                    }
-                                            , DSA.public_y = dsapub
-                                            }
-                                 in Right (PubKeyDSA pubkey, [])
-                            _ -> Left "fromASN1: X509.PubKey: unknown DSA format"
-                        )
+                        decodeASN1Err
+                            "DSA"
+                            bits
+                            xs2
+                            ( \l -> case l of
+                                [IntVal dsapub] ->
+                                    let pubkey =
+                                            DSA.PublicKey
+                                                { DSA.public_params =
+                                                    DSA.Params
+                                                        { DSA.params_p = p
+                                                        , DSA.params_q = q
+                                                        , DSA.params_g = g
+                                                        }
+                                                , DSA.public_y = dsapub
+                                                }
+                                     in Right (PubKeyDSA pubkey, [])
+                                _ -> Left "fromASN1: X509.PubKey: unknown DSA format"
+                            )
                 _ -> Left "fromASN1: X509.PubKey: unknown DSA format"
         | pkalg == getObjectID PubKeyALG_EC =
             case xs of

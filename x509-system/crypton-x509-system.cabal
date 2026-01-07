@@ -1,5 +1,5 @@
 Name:                crypton-x509-system
-version:             1.6.7
+version:             1.6.8
 Synopsis:            Handle per-operating-system X.509 accessors and storage
 Description:         System X.509 handling for accessing operating system dependents store and other storage methods
 License:             BSD3

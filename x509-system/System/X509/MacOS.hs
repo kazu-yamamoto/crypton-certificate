@@ -34,4 +34,6 @@ listInKeyChains keyChains = do
     return targets
 
 getSystemCertificateStore :: IO CertificateStore
-getSystemCertificateStore = maybeSSLCertEnvOr (makeCertificateStore <$> listInKeyChains [rootCAKeyChain, systemKeyChain])
+getSystemCertificateStore =
+    maybeSSLCertEnvOr
+        (makeCertificateStore <$> listInKeyChains [rootCAKeyChain, systemKeyChain])

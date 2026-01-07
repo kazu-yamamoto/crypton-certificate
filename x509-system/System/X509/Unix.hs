@@ -38,7 +38,9 @@ envPathOverride :: String
 envPathOverride = "SYSTEM_CERTIFICATE_PATH"
 
 getSystemCertificateStore :: IO CertificateStore
-getSystemCertificateStore = maybeSSLCertEnvOr (mconcat . catMaybes <$> (getSystemPaths >>= mapM readCertificateStore))
+getSystemCertificateStore =
+    maybeSSLCertEnvOr
+        (mconcat . catMaybes <$> (getSystemPaths >>= mapM readCertificateStore))
 
 getSystemPaths :: IO [FilePath]
 getSystemPaths = E.catch ((: []) <$> getEnv envPathOverride) inDefault

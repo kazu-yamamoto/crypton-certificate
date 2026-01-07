@@ -119,48 +119,52 @@ instance ASN1Object SignatureALG where
             signatureAlg -> Right (signatureAlg, xs)
     fromASN1 (Start Sequence : OID oid : End Sequence : xs) =
         Right (oidSig oid, xs)
-    fromASN1 ( Start Sequence : OID [1, 2, 840, 113549, 1, 1, 10] : Start Sequence : Start _ : Start Sequence
-                    : OID hash1
-                    : End Sequence
-                    : End _
-                    : Start _
-                    : Start Sequence
-                    : OID [1, 2, 840, 113549, 1, 1, 8]
-                    : Start Sequence
-                    : OID _hash2
-                    : End Sequence
-                    : End Sequence
-                    : End _
-                    : Start _
-                    : IntVal _iv
-                    : End _
-                    : End Sequence
-                    : End Sequence
-                    : xs
-                ) =
-        Right (oidSig hash1, xs)
-    fromASN1 ( Start Sequence : OID [1, 2, 840, 113549, 1, 1, 10] : Start Sequence : Start _ : Start Sequence
-                    : OID hash1
-                    : Null
-                    : End Sequence
-                    : End _
-                    : Start _
-                    : Start Sequence
-                    : OID [1, 2, 840, 113549, 1, 1, 8]
-                    : Start Sequence
-                    : OID _hash2
-                    : Null
-                    : End Sequence
-                    : End Sequence
-                    : End _
-                    : Start _
-                    : IntVal _iv
-                    : End _
-                    : End Sequence
-                    : End Sequence
-                    : xs
-                ) =
-        Right (oidSig hash1, xs)
+    fromASN1
+        ( Start Sequence : OID [1, 2, 840, 113549, 1, 1, 10] : Start Sequence : Start _
+                : Start Sequence
+                : OID hash1
+                : End Sequence
+                : End _
+                : Start _
+                : Start Sequence
+                : OID [1, 2, 840, 113549, 1, 1, 8]
+                : Start Sequence
+                : OID _hash2
+                : End Sequence
+                : End Sequence
+                : End _
+                : Start _
+                : IntVal _iv
+                : End _
+                : End Sequence
+                : End Sequence
+                : xs
+            ) =
+            Right (oidSig hash1, xs)
+    fromASN1
+        ( Start Sequence : OID [1, 2, 840, 113549, 1, 1, 10] : Start Sequence : Start _
+                : Start Sequence
+                : OID hash1
+                : Null
+                : End Sequence
+                : End _
+                : Start _
+                : Start Sequence
+                : OID [1, 2, 840, 113549, 1, 1, 8]
+                : Start Sequence
+                : OID _hash2
+                : Null
+                : End Sequence
+                : End Sequence
+                : End _
+                : Start _
+                : IntVal _iv
+                : End _
+                : End Sequence
+                : End Sequence
+                : xs
+            ) =
+            Right (oidSig hash1, xs)
     fromASN1 _ =
         Left "fromASN1: X509.SignatureALG: unknown format"
     toASN1 (SignatureALG_Unknown oid) = \xs -> Start Sequence : OID oid : Null : End Sequence : xs

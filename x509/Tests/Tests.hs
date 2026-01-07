@@ -105,7 +105,8 @@ instance Arbitrary PrivKey where
 
 instance Arbitrary HashALG where
     arbitrary =
-        elements [HashMD2, HashMD5, HashSHA1, HashSHA224, HashSHA256, HashSHA384, HashSHA512]
+        elements
+            [HashMD2, HashMD5, HashSHA1, HashSHA224, HashSHA256, HashSHA384, HashSHA512]
 
 instance Arbitrary PubKeyALG where
     arbitrary = elements [PubKeyALG_RSA, PubKeyALG_DSA, PubKeyALG_EC, PubKeyALG_DH]
