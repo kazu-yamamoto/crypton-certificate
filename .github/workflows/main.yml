@@ -1,0 +1,82 @@
+name: Haskell CI
+
+on:
+  push:
+    branches: [ 'main', 'ci' ]
+  pull_request:
+    branches: [ 'main' ]
+  release:
+    types:
+      - created
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os:  [ 'ubuntu-latest', 'macOS-latest' ]
+        ghc: [ '9.2', '9.4', '9.6', '9.8', '9.10', '9.12' ]
+        include:
+          - os: ubuntu-latest
+            arch: amd64
+            osname: linux
+          - os: macOS-latest
+            arch: arm64
+            osname: mac
+
+    env:
+      cache-name: cabal-ghc
+      build-targets: --disable-benchmarks all:libs all:exes all:tests
+
+    steps:
+    - run: git config --global core.autocrlf false
+
+    - uses: actions/checkout@v4
+
+    - uses: haskell-actions/setup@v2
+      with:
+        ghc-version: ${{ matrix.ghc }}
+        cabal-version: latest
+
+    - name: Hackage index, Cache Key
+      id: params
+      shell: bash
+      run: |
+        ghc_version=$(ghc --numeric-version)
+        cabal v2-update
+        echo "cache=${{ runner.os }}-build-${{ env.cache-name }}-${ghc_version}-${{ hashFiles('**/*.cabal') }}-${{ hashFiles('**/cabal.project') }}" > "$GITHUB_OUTPUT"
+        echo "ghc_version=$ghc_version" >> "$GITHUB_OUTPUT"
+        echo "release_brew=${{ (github.event_name == 'release' || github.ref_name == 'ci-brew') && runner.os == 'macOS' }}" >> "$GITHUB_OUTPUT"
+
+    - name: Restore Cache
+      uses: actions/cache/restore@v4
+      if: ${{ github.ref_name != 'ci-uc' }}
+      with:
+        path: ~/.cabal
+        key: ${{ steps.params.outputs.cache }}
+
+    - name: Install dependencies
+      id: inst-dep
+      shell: bash
+      run: |
+        if cabal v2-build --offline --only-dependencies ${{ env.build-targets }}
+        then
+          echo "installed=false" >> "$GITHUB_OUTPUT"
+        else
+          cabal v2-build --only-dependencies ${{ env.build-targets }}
+          echo "installed=true" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Save Cache
+      uses: actions/cache/save@v4
+      if: ${{ steps.inst-dep.outputs.installed == 'true' || steps.doctest-dep.outputs.installed == 'true' }}
+      with:
+        path: ~/.cabal
+        key: ${{ steps.params.outputs.cache }}
+
+    - name: Build
+      run: cabal v2-build ${{ env.build-targets }}
+
+    - name: Run tests
+      run: env DISABLE_V6_NS=1 cabal v2-test --test-show-details=streaming all:tests
