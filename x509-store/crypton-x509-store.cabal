@@ -42,7 +42,7 @@ library
         crypton-x509 >=1.7.2
 
     if !os(windows)
-        build-depends: unix >=2.8
+        build-depends: unix
 
 test-suite test-x509-store
     type:             exitcode-stdio-1.0
