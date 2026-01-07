@@ -33,7 +33,7 @@ executable crypton-x509-util
         crypton-x509-validation >=1.6.3,
         asn1-types >=0.3,
         asn1-encoding,
-        pem,
+        crypton-pem >= 0.2.4 && < 0.4,
         directory,
         hourglass,
         memory,

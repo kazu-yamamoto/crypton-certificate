@@ -8,5 +8,8 @@ packages:
 - x509-validation
 - x509-util
 
+extra-deps:
+- crypton-pem-0.3.0
+
 nix:
   pure: false
