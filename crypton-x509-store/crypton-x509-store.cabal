@@ -1,6 +1,6 @@
 cabal-version: >=1.10
 name:          crypton-x509-store
-version:       1.6.12
+version:       1.6.13
 license:       BSD3
 license-file:  LICENSE
 copyright:     Vincent Hanquez <vincent@snarc.org>
@@ -14,6 +14,7 @@ description:
 
 category:      Data
 build-type:    Simple
+extra-source-files: ChangeLog.md
 
 source-repository head
     type:     git
