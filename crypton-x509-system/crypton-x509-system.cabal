@@ -38,7 +38,7 @@ library
         directory,
         filepath,
         process,
-        crypton-pem >= 0.2.4 && < 0.4,
+        crypton-pem >=0.2.4 && <0.4,
         crypton-x509 >=1.8.0,
         crypton-x509-store >=1.8.0
 

@@ -1,19 +1,19 @@
-cabal-version: >=1.10
-name:          crypton-x509-util
-version:       1.8.0
-license:       BSD3
-license-file:  LICENSE
-copyright:     Vincent Hanquez <vincent@snar.org>
-maintainer:    Kazu Yamamoto <kazu@iij.ad.jp>
-author:        Vincent Hanquez <vincent@snarc.org>
-stability:     experimental
-homepage:      https://github.com/kazu-yamamoto/crypton-certificate
-synopsis:      Utility for X509 certificate and chain
+cabal-version:      >=1.10
+name:               crypton-x509-util
+version:            1.8.0
+license:            BSD3
+license-file:       LICENSE
+copyright:          Vincent Hanquez <vincent@snar.org>
+maintainer:         Kazu Yamamoto <kazu@iij.ad.jp>
+author:             Vincent Hanquez <vincent@snarc.org>
+stability:          experimental
+homepage:           https://github.com/kazu-yamamoto/crypton-certificate
+synopsis:           Utility for X509 certificate and chain
 description:
     utility to parse, show, validate, sign and produce X509 certificates and chain.
 
-category:      Data
-build-type:    Simple
+category:           Data
+build-type:         Simple
 extra-source-files: ChangeLog.md
 
 source-repository head
@@ -30,8 +30,8 @@ executable crypton-x509-util
         bytestring,
         crypton,
         crypton-asn1-encoding,
-        crypton-asn1-types >= 0.4.1 && < 0.5,
-        crypton-pem >= 0.2.4 && < 0.4,
+        crypton-asn1-types >=0.4.1 && <0.5,
+        crypton-pem >=0.2.4 && <0.4,
         crypton-x509 >=1.8.0,
         crypton-x509-store >=1.8.0,
         crypton-x509-system >=1.8.0,

@@ -1,17 +1,17 @@
-cabal-version: >=1.10
-name:          crypton-x509
-version:       1.8.0
-license:       BSD3
-license-file:  LICENSE
-copyright:     Vincent Hanquez <vincent@snarc.org>
-maintainer:    Kazu Yamamoto <kazu@iij.ad.jp>
-author:        Vincent Hanquez <vincent@snarc.org>
-stability:     experimental
-homepage:      https://github.com/kazu-yamamoto/crypton-certificate
-synopsis:      X509 reader and writer
-description:   X509 reader and writer. please see README
-category:      Data
-build-type:    Simple
+cabal-version:      >=1.10
+name:               crypton-x509
+version:            1.8.0
+license:            BSD3
+license-file:       LICENSE
+copyright:          Vincent Hanquez <vincent@snarc.org>
+maintainer:         Kazu Yamamoto <kazu@iij.ad.jp>
+author:             Vincent Hanquez <vincent@snarc.org>
+stability:          experimental
+homepage:           https://github.com/kazu-yamamoto/crypton-certificate
+synopsis:           X509 reader and writer
+description:        X509 reader and writer. please see README
+category:           Data
+build-type:         Simple
 extra-source-files: ChangeLog.md
 
 source-repository head
@@ -45,10 +45,10 @@ library
         bytestring,
         containers,
         crypton >=0.24,
-        crypton-asn1-encoding >= 0.10.0 && < 0.11,
-        crypton-asn1-parse >= 0.10.0 && < 0.11,
-        crypton-asn1-types >= 0.4.1 && < 0.5,
-        crypton-pem >= 0.2.4 && < 0.4,
+        crypton-asn1-encoding >=0.10.0 && <0.11,
+        crypton-asn1-parse >=0.10.0 && <0.11,
+        crypton-asn1-types >=0.4.1 && <0.5,
+        crypton-pem >=0.2.4 && <0.4,
         memory,
         time-hourglass,
         transformers >=0.4
