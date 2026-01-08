@@ -1,19 +1,19 @@
-cabal-version: >=1.10
-name:          crypton-x509-store
-version:       1.6.13
-license:       BSD3
-license-file:  LICENSE
-copyright:     Vincent Hanquez <vincent@snarc.org>
-maintainer:    Kazu Yamamoto <kazu@iij.ad.jp>
-author:        Vincent Hanquez <vincent@snarc.org>
-stability:     experimental
-homepage:      https://github.com/kazu-yamamoto/crypton-certificate
-synopsis:      X.509 collection accessing and storing methods
+cabal-version:      >=1.10
+name:               crypton-x509-store
+version:            1.6.13
+license:            BSD3
+license-file:       LICENSE
+copyright:          Vincent Hanquez <vincent@snarc.org>
+maintainer:         Kazu Yamamoto <kazu@iij.ad.jp>
+author:             Vincent Hanquez <vincent@snarc.org>
+stability:          experimental
+homepage:           https://github.com/kazu-yamamoto/crypton-certificate
+synopsis:           X.509 collection accessing and storing methods
 description:
     X.509 collection accessing and storing methods for certificate, crl, exception list
 
-category:      Data
-build-type:    Simple
+category:           Data
+build-type:         Simple
 extra-source-files: ChangeLog.md
 
 source-repository head
