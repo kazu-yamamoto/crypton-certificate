@@ -55,8 +55,8 @@ import Data.X509.Validation.Cache
 import Data.X509.Validation.Fingerprint
 import Data.X509.Validation.Signature
 import Data.X509.Validation.Types
-import System.Hourglass
 import Text.Read (readMaybe)
+import Time.System
 
 -- | Possible reason of certificate and chain failure.
 --

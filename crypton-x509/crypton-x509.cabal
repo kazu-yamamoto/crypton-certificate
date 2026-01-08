@@ -1,6 +1,6 @@
 cabal-version: >=1.10
 name:          crypton-x509
-version:       1.7.7
+version:       1.8.0
 license:       BSD3
 license-file:  LICENSE
 copyright:     Vincent Hanquez <vincent@snarc.org>
@@ -12,6 +12,7 @@ synopsis:      X509 reader and writer
 description:   X509 reader and writer. please see README
 category:      Data
 build-type:    Simple
+extra-source-files: ChangeLog.md
 
 source-repository head
     type:     git
@@ -42,15 +43,15 @@ library
     build-depends:
         base >=4.7 && <5,
         bytestring,
-        memory,
-        transformers >=0.4,
         containers,
-        hourglass,
+        crypton >=0.24,
+        crypton-asn1-encoding >= 0.10.0 && < 0.11,
+        crypton-asn1-parse >= 0.10.0 && < 0.11,
+        crypton-asn1-types >= 0.4.1 && < 0.5,
         crypton-pem >= 0.2.4 && < 0.4,
-        asn1-types >=0.3.1 && <0.4,
-        asn1-encoding >=0.9 && <0.10,
-        asn1-parse >=0.9.3 && <0.10,
-        crypton >=0.24
+        memory,
+        time-hourglass,
+        transformers >=0.4
 
 test-suite test-x509
     type:             exitcode-stdio-1.0
@@ -61,10 +62,10 @@ test-suite test-x509
     build-depends:
         base >=3 && <5,
         bytestring,
+        crypton,
+        crypton-x509,
+        crypton-asn1-types,
         mtl,
         tasty,
         tasty-quickcheck,
-        hourglass,
-        asn1-types,
-        crypton-x509,
-        crypton
+        time-hourglass
