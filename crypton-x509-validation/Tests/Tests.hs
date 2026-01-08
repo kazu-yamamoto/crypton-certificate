@@ -20,7 +20,7 @@ import Data.X509.Validation
 import qualified Data.ByteString as BS
 
 import Data.Hourglass
-import System.Hourglass
+import Time.System
 
 import Test.Tasty
 import Test.Tasty.HUnit
