@@ -6,6 +6,10 @@ module Data.X509.File (
     PEMError (..),
 ) where
 
+#ifndef MIN_VERSION_unix
+#define MIN_VERSION_unix(x, y, z) 0
+#endif
+
 import Control.Applicative
 import Control.Exception (Exception (..), throw)
 import Data.ASN1.BinaryEncoding
@@ -16,7 +20,7 @@ import Data.Maybe
 import Data.PEM (PEM, pemContent, pemName, pemParseLBS)
 import qualified Data.X509 as X509
 import Data.X509.Memory (pemToKey)
-#if !defined(mingw32_HOST_OS) && (MIN_VERSION_unix(2,8,0))
+#if defined(MIN_VERSION_unix) && MIN_VERSION_unix(2,8,0)
 import System.Posix.IO
 #endif
 
@@ -28,12 +32,12 @@ instance Exception PEMError where
 
 readPEMs :: FilePath -> IO [PEM]
 readPEMs filepath = do
-#if defined(mingw32_HOST_OS) || !(MIN_VERSION_unix(2,8,0))
-    content <- L.readFile filepath
-#else
+#if defined(MIN_VERSION_unix) && MIN_VERSION_unix(2,8,0)
     fd <- openFd filepath ReadOnly defaultFileFlags{cloexec = True}
     h <- fdToHandle fd
     content <- L.hGetContents h
+#else
+    content <- L.readFile filepath
 #endif
     either (throw . PEMError) pure $ pemParseLBS content
 
