@@ -1,6 +1,6 @@
 cabal-version:      >=1.10
 name:               crypton-x509-util
-version:            1.8.0
+version:            1.9.0
 license:            BSD3
 license-file:       LICENSE
 copyright:          Vincent Hanquez <vincent@snar.org>
@@ -28,14 +28,14 @@ executable crypton-x509-util
     build-depends:
         base >=3 && <5,
         bytestring,
-        crypton,
+        crypton >=1.1.0 && <1.2,
         crypton-asn1-encoding,
         crypton-asn1-types >=0.4.1 && <0.5,
         crypton-pem >=0.2.4 && <0.4,
-        crypton-x509 >=1.8.0,
-        crypton-x509-store >=1.8.0,
-        crypton-x509-system >=1.8.0,
-        crypton-x509-validation >=1.8.0,
+        crypton-x509 >=1.9.0 && <2.0,
+        crypton-x509-store >=1.9.0 && <2.0,
+        crypton-x509-system >=1.9.0 && <2.0,
+        crypton-x509-validation >=1.9.0 && <2.0,
         directory,
-        memory,
+        ram,
         time-hourglass

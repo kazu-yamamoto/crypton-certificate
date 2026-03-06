@@ -1,6 +1,6 @@
 cabal-version:      >=1.10
 name:               crypton-x509-system
-version:            1.8.0
+version:            1.9.0
 license:            BSD3
 license-file:       LICENSE
 copyright:          Vincent Hanquez <vincent@snarc.org>
@@ -39,8 +39,8 @@ library
         filepath,
         process,
         crypton-pem >=0.2.4 && <0.4,
-        crypton-x509 >=1.8.0,
-        crypton-x509-store >=1.8.0
+        crypton-x509 >=1.9.0 && <2.0,
+        crypton-x509-store >=1.9.0 && <2.0
 
     if os(windows)
         exposed-modules: System.X509.Win32
