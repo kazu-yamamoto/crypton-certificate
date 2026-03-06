@@ -39,8 +39,8 @@ library
         filepath,
         process,
         crypton-pem >=0.2.4 && <0.4,
-        crypton-x509 >=1.9.0 && <2.0,
-        crypton-x509-store >=1.9.0 && <2.0
+        crypton-x509 >=1.9.0 && <1.10,
+        crypton-x509-store >=1.9.0 && <1.10
 
     if os(windows)
         exposed-modules: System.X509.Win32
