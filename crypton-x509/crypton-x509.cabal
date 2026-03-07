@@ -1,6 +1,6 @@
 cabal-version:      >=1.10
 name:               crypton-x509
-version:            1.8.0
+version:            1.9.0
 license:            BSD3
 license-file:       LICENSE
 copyright:          Vincent Hanquez <vincent@snarc.org>
@@ -44,12 +44,12 @@ library
         base >=4.7 && <5,
         bytestring,
         containers,
-        crypton >=0.24,
+        crypton >=1.1 && <1.2,
         crypton-asn1-encoding >=0.10.0 && <0.11,
         crypton-asn1-parse >=0.10.0 && <0.11,
         crypton-asn1-types >=0.4.1 && <0.5,
         crypton-pem >=0.2.4 && <0.4,
-        memory,
+        ram,
         time-hourglass,
         transformers >=0.4
 

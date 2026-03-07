@@ -1,5 +1,10 @@
 # ChangeLog for crypton-x509-util
 
+## 1.9.0
+
+* Using "ram" instead of "memory"
+  [#29](https://github.com/kazu-yamamoto/crypton-certificate/pull/29)
+
 ## v1.8.0
 
 * Depend indirectly on package `time-hourglass`, rather than `hourglass`. Date
