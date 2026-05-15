@@ -91,6 +91,9 @@ showExts es@(Extensions (Just exts)) = do
     showKnownExtension
         "authority-key-id"
         (X509.extensionGetE es :: Maybe (Either String X509.ExtAuthorityKeyId))
+    showKnownExtension
+        "name-constraint"
+        (X509.extensionGetE es :: Maybe (Either String X509.ExtNameConstraints))
   where
     showExt er = do
         putStrLn
