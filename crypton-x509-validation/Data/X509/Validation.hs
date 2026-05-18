@@ -272,7 +272,9 @@ validatePure
     -- ^ the return failed reasons (empty list is no failure)
 validatePure _ _ _ _ _ (CertificateChain []) = [EmptyChain]
 validatePure validationTime hooks checks store (fqhn, _) (CertificateChain (top : rchain)) =
-    hookFilterReason hooks (doLeafChecks |> doCheckChain 0 top rchain)
+    hookFilterReason
+        hooks
+        (doLeafChecks |> doCheckChain 0 top rchain |> doCheckNameConst top rchain)
   where
     isExhaustive :: Bool
     isExhaustive = checkExhaustive checks
@@ -400,9 +402,6 @@ validatePure validationTime hooks checks store (fqhn, _) (CertificateChain (top 
             [ (checkTimeValidity checks, hookValidateTime hooks validationTime cert)
             , (True, doCriticalExtensionSweep cert)
             ]
-    isSelfSigned :: Certificate -> Bool
-    isSelfSigned cert = certSubjectDN cert == certIssuerDN cert
-
     -- check signature of 'signedCert' against the 'signingCert'
     checkSignature
         :: SignedCertificate -> SignedCertificate -> [FailedReason]
@@ -410,6 +409,49 @@ validatePure validationTime hooks checks store (fqhn, _) (CertificateChain (top 
         case verifySignedSignature signedCert (certPubKey $ getCertificate signingCert) of
             SignaturePass -> []
             SignatureFailed r -> [InvalidSignature r]
+
+    doCheckNameConst :: SignedCertificate -> [SignedCertificate] -> [FailedReason]
+    doCheckNameConst current0 chain0 = case loop current0 chain0 [] of
+        Left errs -> errs
+        Right ts -> checkNameConstraints ts
+      where
+        loop current chain acc = case findCertificate issuer store of
+            Just anchor -> Right $ getNameConstSpec (getCertificate anchor) True : spec : acc
+            Nothing
+                | null chain -> Left [] -- to pass the test
+                | otherwise -> case findIssuer issuer chain of
+                    Nothing -> Left [] -- to pass the test
+                    Just (issuer', remaining) -> loop issuer' remaining (spec : acc)
+          where
+            cert = getCertificate current
+            issuer = certIssuerDN cert
+            spec = getNameConstSpec cert (current0 /= current)
+
+isSelfSigned :: Certificate -> Bool
+isSelfSigned cert = certSubjectDN cert == certIssuerDN cert
+
+data NameConstSpec = NameConstSpec
+    { ncSANs :: [AltName]
+    , ncExt :: Maybe ExtNameConstraints
+    , ncSelfSigned :: Bool
+    , ncCA :: Bool
+    }
+
+getNameConstSpec :: Certificate -> Bool -> NameConstSpec
+getNameConstSpec cert ca =
+    NameConstSpec
+        { ncSANs = sans
+        , ncExt = extensionGet exts
+        , ncSelfSigned = isSelfSigned cert
+        , ncCA = ca
+        }
+  where
+    exts = certExtensions cert
+    subj = AltNameDN $ certSubjectDN cert
+    sans :: [AltName]
+    sans = case extensionGet exts of
+        Nothing -> [subj]
+        Just (ExtSubjectAltName alts) -> subj : alts
 
 -- | Validate that the current time is between validity bounds
 validateTime :: DateTime -> Certificate -> [FailedReason]
@@ -543,6 +585,82 @@ exhaustiveList _ [] = []
 exhaustiveList isExhaustive ((performCheck, c) : cs)
     | performCheck = exhaustive isExhaustive c (exhaustiveList isExhaustive cs)
     | otherwise = exhaustiveList isExhaustive cs
+
+checkNameConstraints :: [NameConstSpec] -> [FailedReason]
+checkNameConstraints xs0 = loop xs0
+  where
+    loop [] = []
+    loop [_] = []
+    loop [a, b] = check a b
+    loop (a : b : cs) =
+        check a b ++ case nextNameConstSpec a b of
+            Left errs -> errs
+            Right b' -> loop (b' : cs)
+
+    check ncs0 ncs1
+        | ncSelfSigned ncs1 = []
+        | otherwise = case ncExt ncs0 of
+            Nothing -> []
+            Just nc0 -> validateNamesInSubtrees (ncSANs ncs1) nc0
+
+nextNameConstSpec
+    :: NameConstSpec
+    -> NameConstSpec
+    -> Either [FailedReason] NameConstSpec
+nextNameConstSpec ncs0 ncs1
+    | not (ncCA ncs1) = Right ncs1
+    | otherwise = case stricter (ncExt ncs0) (ncExt ncs1) of
+        Left errs -> Left errs
+        Right mNC -> Right $ ncs1{ncExt = mNC}
+
+stricter
+    :: Maybe ExtNameConstraints -- issuer: should be looser
+    -> Maybe ExtNameConstraints -- should be stricter
+    -> Either [FailedReason] (Maybe ExtNameConstraints)
+stricter Nothing mnc = Right mnc
+stricter (Just x) Nothing = Left [InvalidName $ show x]
+stricter
+    (Just (ExtNameConstraints permitted0 excluded0))
+    (Just (ExtNameConstraints permitted1 excluded1))
+        | null errs =
+            Right $ Just $ ExtNameConstraints permitted1 (excluded1 ++ excluded0)
+        | otherwise = Left errs
+      where
+        errs = strictCheck permitted0 permitted1
+
+strictCheck :: [GeneralSubtree] -> [GeneralSubtree] -> [FailedReason]
+strictCheck permitted0 permitted1 = concatMap f permitted1
+  where
+    f (GeneralSubtree a _ _)
+        | any (\g -> (a `isIncludedIn` g) == Just True) permitted0 = []
+        | otherwise = [InvalidName $ show a]
+
+validateNamesInSubtrees :: [AltName] -> ExtNameConstraints -> [FailedReason]
+validateNamesInSubtrees altNames (ExtNameConstraints permitted excluded) =
+    concatMap inc altNames ++ concatMap exc altNames
+  where
+    inc a
+        | nsMatch a permitted = []
+        | otherwise = [InvalidName $ show a]
+    exc a
+        | nsNotMatch a excluded = []
+        | otherwise = [InvalidName $ show a]
+
+nsMatch :: AltName -> [GeneralSubtree] -> Bool
+nsMatch a gs = any (== Just True) rs || all isNothing rs
+  where
+    rs = map (a `isIncludedIn`) gs
+
+nsNotMatch :: AltName -> [GeneralSubtree] -> Bool
+nsNotMatch a gs = all (\g -> (a `isIncludedIn` g) /= Just True) gs
+
+isIncludedIn :: AltName -> GeneralSubtree -> Maybe Bool
+isIncludedIn (AltNameDN nm0) (GeneralSubtree (AltNameDN nm1) _ _) = Just (nm0 == nm1)
+isIncludedIn (AltNameDNS nm0) (GeneralSubtree (AltNameDNS nm1) _ _) = Just (nm0 == nm1 || ('.' : nm1) `isSuffixOf` nm0)
+-- isIncludedIn (AltNameRFC822 _) (GeneralSubtree  (AltNameRFC822 _) _ _)= undefined
+-- isIncludedIn (AltNameURI _) (GeneralSubtree  (AltNameURI _) _ _)= undefined
+-- isIncludedIn (AltNameIP _) (GeneralSubtree (AltNameIP _) _ _)= undefined
+isIncludedIn _ _ = Nothing
 
 doCriticalExtensionSweep :: Certificate -> [FailedReason]
 doCriticalExtensionSweep cert = case mexts of
