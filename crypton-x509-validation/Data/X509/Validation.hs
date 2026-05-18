@@ -274,9 +274,13 @@ validatePure _ _ _ _ _ (CertificateChain []) = [EmptyChain]
 validatePure validationTime hooks checks store (fqhn, _) (CertificateChain (top : rchain)) =
     hookFilterReason hooks (doLeafChecks |> doCheckChain 0 top rchain)
   where
+    isExhaustive :: Bool
     isExhaustive = checkExhaustive checks
+
+    (|>) :: [FailedReason] -> [FailedReason] -> [FailedReason]
     a |> b = exhaustive isExhaustive a b
 
+    doLeafChecks :: [FailedReason]
     doLeafChecks = doNameCheck top ++ doV3Check topCert ++ doKeyUsageCheck topCert
       where
         topCert = getCertificate top
@@ -300,9 +304,14 @@ validatePure validationTime hooks checks store (fqhn, _) (CertificateChain (top 
                                         |> doCheckChain (level + 1) issuer remaining
                )
       where
+        cert :: Certificate
         cert = getCertificate current
     -- in a strict ordering check the next certificate has to be the issuer.
     -- otherwise we dynamically reorder the chain to have the necessary certificate
+    findIssuer
+        :: DistinguishedName
+        -> [SignedCertificate]
+        -> Maybe (SignedCertificate, [SignedCertificate])
     findIssuer issuerDN chain
         | checkStrictOrdering checks =
             case chain of
@@ -313,6 +322,7 @@ validatePure validationTime hooks checks store (fqhn, _) (CertificateChain (top 
         | otherwise =
             (\x -> (x, filter (/= x) chain))
                 `fmap` find (matchSubjectIdentifier issuerDN . getCertificate) chain
+    matchSubjectIdentifier :: DistinguishedName -> Certificate -> Bool
     matchSubjectIdentifier = hookMatchSubjectIssuer hooks
 
     -- we check here that the certificate is allowed to be a certificate
@@ -342,16 +352,19 @@ validatePure validationTime hooks checks store (fqhn, _) (CertificateChain (top 
                 | fromIntegral pl >= level -> True
                 | otherwise -> False
 
+    doNameCheck :: SignedCertificate -> [FailedReason]
     doNameCheck cert
         | not (checkFQHN checks) = []
         | otherwise = (hookValidateName hooks) fqhn (getCertificate cert)
 
+    doV3Check :: Certificate -> [FailedReason]
     doV3Check cert
         | checkLeafV3 checks = case certVersion cert of
             2 {- confusingly it means X509.V3 -} -> []
             _ -> [LeafNotV3]
         | otherwise = []
 
+    doKeyUsageCheck :: Certificate -> [FailedReason]
     doKeyUsageCheck cert =
         compareListIfExistAndNotNull
             mflags
@@ -377,6 +390,7 @@ validatePure validationTime hooks checks store (fqhn, _) (CertificateChain (top 
             | intersect expected list == expected = []
             | otherwise = [err]
 
+    doCheckCertificate :: Certificate -> [FailedReason]
     doCheckCertificate cert =
         exhaustiveList
             (checkExhaustive checks)
@@ -386,6 +400,8 @@ validatePure validationTime hooks checks store (fqhn, _) (CertificateChain (top 
     isSelfSigned cert = certSubjectDN cert == certIssuerDN cert
 
     -- check signature of 'signedCert' against the 'signingCert'
+    checkSignature
+        :: SignedCertificate -> SignedCertificate -> [FailedReason]
     checkSignature signedCert signingCert =
         case verifySignedSignature signedCert (certPubKey $ getCertificate signingCert) of
             SignaturePass -> []
