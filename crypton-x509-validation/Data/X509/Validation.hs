@@ -65,7 +65,7 @@ import Time.System
 -- instead.
 data FailedReason
     = -- | certificate contains an unknown critical extension
-      UnknownCriticalExtension
+      UnknownCriticalExtension OID
     | -- | validity ends before checking time
       Expired
     | -- | validity starts after checking time
@@ -281,7 +281,10 @@ validatePure validationTime hooks checks store (fqhn, _) (CertificateChain (top 
     a |> b = exhaustive isExhaustive a b
 
     doLeafChecks :: [FailedReason]
-    doLeafChecks = doNameCheck top ++ doV3Check topCert ++ doKeyUsageCheck topCert
+    doLeafChecks =
+        doNameCheck top
+            ++ doV3Check topCert
+            ++ doKeyUsageCheck topCert
       where
         topCert = getCertificate top
 
@@ -395,6 +398,7 @@ validatePure validationTime hooks checks store (fqhn, _) (CertificateChain (top 
         exhaustiveList
             (checkExhaustive checks)
             [ (checkTimeValidity checks, hookValidateTime hooks validationTime cert)
+            , (True, doCriticalExtensionSweep cert)
             ]
     isSelfSigned :: Certificate -> Bool
     isSelfSigned cert = certSubjectDN cert == certIssuerDN cert
@@ -539,3 +543,15 @@ exhaustiveList _ [] = []
 exhaustiveList isExhaustive ((performCheck, c) : cs)
     | performCheck = exhaustive isExhaustive c (exhaustiveList isExhaustive cs)
     | otherwise = exhaustiveList isExhaustive cs
+
+doCriticalExtensionSweep :: Certificate -> [FailedReason]
+doCriticalExtensionSweep cert = case mexts of
+    Nothing -> []
+    Just exts ->
+        [ UnknownCriticalExtension oid
+        | ExtensionRaw oid critical _ <- exts
+        , critical
+        , oid `notElem` recognizedOIDs
+        ]
+  where
+    Extensions mexts = certExtensions cert
