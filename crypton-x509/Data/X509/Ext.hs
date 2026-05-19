@@ -34,6 +34,7 @@ module Data.X509.Ext (
     extensionGetE,
     extensionDecode,
     extensionEncode,
+    recognizedOIDs,
 ) where
 
 import Control.Applicative
@@ -507,3 +508,16 @@ decodeGeneralSubtree (Start Sequence : xs) = do
             Left "GeneralSubtree: missing end sequence"
 decodeGeneralSubtree _ =
     Left "GeneralSubtree: invalid ASN1"
+
+recognizedOIDs :: [OID]
+recognizedOIDs =
+    [ [2, 5, 29, 19] -- ExtBasicConstraints
+    , [2, 5, 29, 15] -- ExtKeyUsage
+    , [2, 5, 29, 37] -- ExtExtendedKeyUsage
+    , [2, 5, 29, 14] -- ExtSubjectKeyId
+    , [2, 5, 29, 17] -- ExtSubjectAltName
+    , [2, 5, 29, 35] -- ExtAuthorityKeyId
+    , [2, 5, 29, 31] -- ExtCrlDistributionPoints
+    , [2, 5, 29, 30] -- ExtNameConstraints
+    , [2, 16, 840, 1, 113730, 1, 13] -- ExtNetscapeComment
+    ]
