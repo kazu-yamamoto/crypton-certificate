@@ -224,12 +224,12 @@ instance Extension ExtSubjectKeyId where
 -- Not all name types are available, missing:
 -- otherName
 -- x400Address
--- directoryName
 -- ediPartyName
 -- registeredID
 data AltName
     = AltNameRFC822 String
     | AltNameDNS String
+    | AltNameDN DistinguishedName
     | AltNameURI String
     | AltNameIP B.ByteString
     | AltNameXMPP String
@@ -334,6 +334,11 @@ getAddr = do
         case n of
             (Other Context 1 b) -> return $ AltNameRFC822 $ BC.unpack b
             (Other Context 2 b) -> return $ AltNameDNS $ BC.unpack b
+            (Other Context 4 b) -> case decodeASN1' DER b of
+                Left e1 -> throwParseError $ show e1
+                Right as -> case runParseASN1 getObject as of
+                    Right dn -> return $ AltNameDN dn
+                    Left e2 -> throwParseError e2
             (Other Context 6 b) -> return $ AltNameURI $ BC.unpack b
             (Other Context 7 b) -> return $ AltNameIP b
             _ ->
@@ -348,6 +353,7 @@ encodeGeneralNames names =
 encodeAltName :: AltName -> [ASN1]
 encodeAltName (AltNameRFC822 n) = [Other Context 1 $ BC.pack n]
 encodeAltName (AltNameDNS n) = [Other Context 2 $ BC.pack n]
+encodeAltName (AltNameDN dn) = [Other Context 4 $ encodeASN1' DER $ toASN1 dn []]
 encodeAltName (AltNameURI n) = [Other Context 6 $ BC.pack n]
 encodeAltName (AltNameIP n) = [Other Context 7 $ n]
 encodeAltName (AltNameXMPP n) =
