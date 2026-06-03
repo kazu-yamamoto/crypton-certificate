@@ -1,5 +1,10 @@
 # ChangeLog for crypton-x509-validation
 
+## 1.9.1
+
+* Implementing the X509 name constrains extension.
+  [#30](https://github.com/kazu-yamamoto/crypton-certificate/pull/30)
+
 ## 1.9.0
 
 * Using "ram" instead of "memory"
