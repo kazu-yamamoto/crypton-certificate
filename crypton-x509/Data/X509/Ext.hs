@@ -23,6 +23,8 @@ module Data.X509.Ext (
     ExtAuthorityKeyId (..),
     ExtCrlDistributionPoints (..),
     ExtNetscapeComment (..),
+    ExtNameConstraints (..),
+    GeneralSubtree (..),
     AltName (..),
     DistributionPoint (..),
     ReasonFlag (..),
@@ -32,6 +34,7 @@ module Data.X509.Ext (
     extensionGetE,
     extensionDecode,
     extensionEncode,
+    recognizedOIDs,
 ) where
 
 import Control.Applicative
@@ -221,12 +224,12 @@ instance Extension ExtSubjectKeyId where
 -- Not all name types are available, missing:
 -- otherName
 -- x400Address
--- directoryName
 -- ediPartyName
 -- registeredID
 data AltName
     = AltNameRFC822 String
     | AltNameDNS String
+    | AltNameDN DistinguishedName
     | AltNameURI String
     | AltNameIP B.ByteString
     | AltNameXMPP String
@@ -291,12 +294,14 @@ instance Extension ExtCrlDistributionPoints where
 
 parseGeneralNames :: ParseASN1 [AltName]
 parseGeneralNames = onNextContainer Sequence $ getMany getAddr
+
+getAddr :: ParseASN1 AltName
+getAddr = do
+    m <- onNextContainerMaybe (Container Context 0) getComposedAddr
+    case m of
+        Nothing -> getSimpleAddr
+        Just r -> return r
   where
-    getAddr = do
-        m <- onNextContainerMaybe (Container Context 0) getComposedAddr
-        case m of
-            Nothing -> getSimpleAddr
-            Just r -> return r
     getComposedAddr = do
         n <- getNext
         case n of
@@ -329,6 +334,11 @@ parseGeneralNames = onNextContainer Sequence $ getMany getAddr
         case n of
             (Other Context 1 b) -> return $ AltNameRFC822 $ BC.unpack b
             (Other Context 2 b) -> return $ AltNameDNS $ BC.unpack b
+            (Other Context 4 b) -> case decodeASN1' DER b of
+                Left e1 -> throwParseError $ show e1
+                Right as -> case runParseASN1 getObject as of
+                    Right dn -> return $ AltNameDN dn
+                    Left e2 -> throwParseError e2
             (Other Context 6 b) -> return $ AltNameURI $ BC.unpack b
             (Other Context 7 b) -> return $ AltNameIP b
             _ ->
@@ -339,27 +349,29 @@ encodeGeneralNames names =
     [Start Sequence]
         ++ concatMap encodeAltName names
         ++ [End Sequence]
-  where
-    encodeAltName (AltNameRFC822 n) = [Other Context 1 $ BC.pack n]
-    encodeAltName (AltNameDNS n) = [Other Context 2 $ BC.pack n]
-    encodeAltName (AltNameURI n) = [Other Context 6 $ BC.pack n]
-    encodeAltName (AltNameIP n) = [Other Context 7 $ n]
-    encodeAltName (AltNameXMPP n) =
-        [ Start (Container Context 0)
-        , OID [1, 3, 6, 1, 5, 5, 7, 8, 5]
-        , Start (Container Context 0)
-        , ASN1String $ asn1CharacterString UTF8 n
-        , End (Container Context 0)
-        , End (Container Context 0)
-        ]
-    encodeAltName (AltNameDNSSRV n) =
-        [ Start (Container Context 0)
-        , OID [1, 3, 6, 1, 5, 5, 7, 8, 5]
-        , Start (Container Context 0)
-        , ASN1String $ asn1CharacterString UTF8 n
-        , End (Container Context 0)
-        , End (Container Context 0)
-        ]
+
+encodeAltName :: AltName -> [ASN1]
+encodeAltName (AltNameRFC822 n) = [Other Context 1 $ BC.pack n]
+encodeAltName (AltNameDNS n) = [Other Context 2 $ BC.pack n]
+encodeAltName (AltNameDN dn) = [Other Context 4 $ encodeASN1' DER $ toASN1 dn []]
+encodeAltName (AltNameURI n) = [Other Context 6 $ BC.pack n]
+encodeAltName (AltNameIP n) = [Other Context 7 $ n]
+encodeAltName (AltNameXMPP n) =
+    [ Start (Container Context 0)
+    , OID [1, 3, 6, 1, 5, 5, 7, 8, 5]
+    , Start (Container Context 0)
+    , ASN1String $ asn1CharacterString UTF8 n
+    , End (Container Context 0)
+    , End (Container Context 0)
+    ]
+encodeAltName (AltNameDNSSRV n) =
+    [ Start (Container Context 0)
+    , OID [1, 3, 6, 1, 5, 5, 7, 8, 5]
+    , Start (Container Context 0)
+    , ASN1String $ asn1CharacterString UTF8 n
+    , End (Container Context 0)
+    , End (Container Context 0)
+    ]
 
 bitsToFlags :: Enum a => BitArray -> [a]
 bitsToFlags bits = concat $ flip map [0 .. (bitArrayLength bits - 1)] $ \i -> do
@@ -381,3 +393,137 @@ instance Extension ExtNetscapeComment where
     extDecode = error "Extension: Netscape Comment do not contain nested ASN1"
     extEncodeBs (ExtNetscapeComment b) = b
     extDecodeBs = Right . ExtNetscapeComment
+
+--------------------------------------------------------------------------------
+-- RFC5280
+--
+-- NameConstraints ::= SEQUENCE {
+--      permittedSubtrees       [0]     GeneralSubtrees OPTIONAL,
+--      excludedSubtrees        [1]     GeneralSubtrees OPTIONAL
+-- }
+--
+-- GeneralSubtrees ::= SEQUENCE SIZE (1..MAX) OF GeneralSubtree
+--
+-- GeneralSubtree ::= SEQUENCE {
+--      base                    GeneralName,
+--      minimum         [0]     BaseDistance DEFAULT 0,
+--      maximum         [1]     BaseDistance OPTIONAL
+-- }
+--------------------------------------------------------------------------------
+
+data GeneralSubtree = GeneralSubtree AltName Integer (Maybe Integer)
+    deriving (Show, Eq)
+
+data ExtNameConstraints = ExtNameConstraints [GeneralSubtree] [GeneralSubtree]
+    deriving (Show, Eq)
+
+instance Extension ExtNameConstraints where
+    extOID _ = [2, 5, 29, 30]
+    extHasNestedASN1 _ = True
+    extEncode = encodeNameConstraints
+    extDecode = decodeNameConstraints
+
+--------------------------------------------------------------------------------
+-- Encoding
+--------------------------------------------------------------------------------
+
+encodeNameConstraints :: ExtNameConstraints -> [ASN1]
+encodeNameConstraints (ExtNameConstraints permitted excluded) =
+    [Start Sequence]
+        ++ put 0 permitted
+        ++ put 1 excluded
+        ++ [End Sequence]
+  where
+    put _ [] = []
+    put n xs =
+        [Start (Container Context n), Start Sequence]
+            ++ concatMap encodeGeneralSubtree xs
+            ++ [End Sequence, End (Container Context n)]
+
+encodeGeneralSubtree :: GeneralSubtree -> [ASN1]
+encodeGeneralSubtree (GeneralSubtree base minimum' maximum') =
+    [Start Sequence]
+        ++ encodeAltName base
+        ++ ( if minimum' /= 0
+                then [Other Context 0 (encodeASN1' DER [IntVal minimum'])]
+                else []
+           )
+        ++ maybe
+            []
+            ( \m ->
+                [Other Context 1 (encodeASN1' DER [IntVal m])]
+            )
+            maximum'
+        ++ [End Sequence]
+
+--------------------------------------------------------------------------------
+-- Decoding
+--------------------------------------------------------------------------------
+
+decodeNameConstraints :: [ASN1] -> Either String ExtNameConstraints
+decodeNameConstraints
+    (Start Sequence : xs) =
+        go xs [] []
+      where
+        go (End Sequence : _) permitted excluded =
+            Right $ ExtNameConstraints permitted excluded
+        go (Start (Container Context 0) : rest) _ excluded = do
+            (subs, rest') <- decodeSubtrees rest
+            go rest' subs excluded
+        go (Start (Container Context 1) : rest) permitted _ = do
+            (subs, rest') <- decodeSubtrees rest
+            go rest' permitted subs
+        go _ _ _ = Left "Invalid NameConstraints"
+        decodeSubtrees :: [ASN1] -> Either String ([GeneralSubtree], [ASN1])
+        decodeSubtrees ys = loop ys []
+          where
+            loop (End (Container Context _) : rest) acc =
+                Right (reverse acc, rest)
+            loop zs acc = do
+                (s, zs') <- decodeGeneralSubtree zs
+                loop zs' (s : acc)
+decodeNameConstraints _ =
+    Left "NameConstraints: expected SEQUENCE"
+
+decodeGeneralSubtree
+    :: [ASN1]
+    -> Either String (GeneralSubtree, [ASN1])
+decodeGeneralSubtree (Start Sequence : xs) = do
+    (base, rest1) <- runParseASN1State getAddr xs
+
+    let (minimum', rest2) =
+            case rest1 of
+                (Other Context 0 bs : rs) ->
+                    case decodeASN1' DER bs of
+                        Right [IntVal n] -> (n, rs)
+                        _ -> (0, rest1)
+                _ -> (0, rest1)
+
+    let (maximum', rest3) =
+            case rest2 of
+                (Other Context 1 bs : rs) ->
+                    case decodeASN1' DER bs of
+                        Right [IntVal n] -> (Just n, rs)
+                        _ -> (Nothing, rest2)
+                _ -> (Nothing, rest2)
+
+    case rest3 of
+        (End Sequence : rs) ->
+            Right (GeneralSubtree base minimum' maximum', rs)
+        _ ->
+            Left "GeneralSubtree: missing end sequence"
+decodeGeneralSubtree _ =
+    Left "GeneralSubtree: invalid ASN1"
+
+recognizedOIDs :: [OID]
+recognizedOIDs =
+    [ [2, 5, 29, 19] -- ExtBasicConstraints
+    , [2, 5, 29, 15] -- ExtKeyUsage
+    , [2, 5, 29, 37] -- ExtExtendedKeyUsage
+    , [2, 5, 29, 14] -- ExtSubjectKeyId
+    , [2, 5, 29, 17] -- ExtSubjectAltName
+    , [2, 5, 29, 35] -- ExtAuthorityKeyId
+    , [2, 5, 29, 31] -- ExtCrlDistributionPoints
+    , [2, 5, 29, 30] -- ExtNameConstraints
+    , [2, 16, 840, 1, 113730, 1, 13] -- ExtNetscapeComment
+    ]
