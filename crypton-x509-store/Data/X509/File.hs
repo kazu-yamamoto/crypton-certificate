@@ -10,7 +10,7 @@ module Data.X509.File (
 #define MIN_VERSION_unix(x, y, z) 0
 #endif
 
-import Control.Exception (Exception (..), throw)
+import qualified Control.Exception as E
 import Data.ASN1.Types
 import qualified Data.ByteString.Lazy as L
 import Data.Maybe
@@ -24,7 +24,7 @@ import System.Posix.IO
 newtype PEMError = PEMError {displayPEMError :: String}
     deriving (Show)
 
-instance Exception PEMError where
+instance E.Exception PEMError where
     displayException = displayPEMError
 
 readPEMs :: FilePath -> IO [PEM]
@@ -36,7 +36,7 @@ readPEMs filepath = do
 #else
     content <- L.readFile filepath
 #endif
-    either (throw . PEMError) pure $ pemParseLBS content
+    either (E.throw . PEMError) pure $ pemParseLBS content
 
 -- | return all the signed objects in a file.
 --

@@ -10,7 +10,7 @@ import Data.Word
 import Foreign.Ptr
 import Foreign.Storable
 
-import Control.Exception (catch)
+import qualified Control.Exception as E
 import Control.Monad (when)
 
 import qualified Data.ByteString.Internal as B
@@ -71,4 +71,4 @@ getSystemCertificateStore = maybeSSLCertEnvOr $ do
                     case ecert of
                         Left _ -> loop st r
                         Right cert -> (cert :) <$> (loop st r)
-                    `catch` \(_ :: ASN1Error) -> loop st r
+                    `E.catch` \(_ :: ASN1Error) -> loop st r
