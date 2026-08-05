@@ -20,6 +20,7 @@ import System.Environment (getEnv)
 import System.X509.Common (maybeSSLCertEnvOr)
 
 import qualified Control.Exception as E
+import qualified System.IO.Error as E
 
 import Data.Maybe (catMaybes)
 
@@ -41,7 +42,7 @@ getSystemCertificateStore =
         (mconcat . catMaybes <$> (getSystemPaths >>= mapM readCertificateStore))
 
 getSystemPaths :: IO [FilePath]
-getSystemPaths = E.catch ((: []) <$> getEnv envPathOverride) inDefault
+getSystemPaths = E.catchIOError ((: []) <$> getEnv envPathOverride) inDefault
   where
     inDefault :: E.IOException -> IO [FilePath]
     inDefault _ = return defaultSystemPaths

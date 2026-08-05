@@ -32,6 +32,7 @@ import System.Directory (
     getDirectoryContents,
  )
 import System.FilePath ((</>))
+import qualified System.IO.Error as E
 
 -- | A Collection of certificate or store of certificates.
 data CertificateStore
@@ -106,7 +107,7 @@ readCertificateStore path = do
 -- The file may contains multiple certificates
 readCertificates :: FilePath -> IO [SignedCertificate]
 readCertificates file =
-    E.catch
+    E.catchIOError
         (either (const []) (rights . map getCert) . pemParseBS <$> B.readFile file)
         skipIOError
   where
@@ -129,7 +130,7 @@ listDirectoryCerts path =
     isCert x = (not $ isPrefixOf "." x) && (not $ isHashedFile x)
 
     getDirContents =
-        E.catch
+        E.catchIOError
             (map (path </>) . filter isCert <$> getDirectoryContents path)
             emptyPaths
       where
