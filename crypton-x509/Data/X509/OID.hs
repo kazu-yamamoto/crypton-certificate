@@ -11,7 +11,6 @@ module Data.X509.OID (
     curvesOIDTable,
 ) where
 
-import Control.Applicative
 import Crypto.PubKey.ECC.Types
 import Data.ASN1.OID
 import Data.List (find)

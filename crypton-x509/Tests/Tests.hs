@@ -7,7 +7,6 @@ import Test.Tasty.QuickCheck
 
 import qualified Data.ByteString as B
 
-import Control.Applicative
 import Control.Monad
 
 import Crypto.Error (throwCryptoError)

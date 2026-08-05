@@ -10,7 +10,6 @@
 -- X.509 Certificate types and functions
 module Data.X509.Cert (Certificate (..)) where
 
-import Control.Applicative ((<$>), (<*>))
 import Data.ASN1.Types
 import Data.Hourglass
 import Data.X509.AlgorithmIdentifier

@@ -1,7 +1,6 @@
 -- | Validation test suite.
 module Main (main) where
 
-import Control.Applicative
 import Control.Monad (unless)
 
 import Crypto.Hash.Algorithms

@@ -20,7 +20,6 @@ import           Data.Semigroup
 #else
 import           Data.Monoid
 #endif
-import Control.Applicative ((<$>))
 import qualified Control.Exception as E
 import Control.Monad (filterM, mplus)
 import qualified Data.ByteString as B

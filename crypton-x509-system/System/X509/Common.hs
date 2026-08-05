@@ -4,8 +4,7 @@ module System.X509.Common (
 where
 
 import Data.Foldable (asum)
-import Data.Maybe (catMaybes, fromMaybe)
-import Data.Monoid (mconcat)
+import Data.Maybe (fromMaybe)
 import Data.X509.CertificateStore
 import System.Environment (lookupEnv)
 

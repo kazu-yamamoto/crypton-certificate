@@ -2,7 +2,6 @@ module System.X509.MacOS (
     getSystemCertificateStore,
 ) where
 
-import Control.Applicative
 import qualified Data.ByteString.Lazy as LBS
 import Data.Either
 import Data.PEM (PEM (..), pemParseLBS)

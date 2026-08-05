@@ -37,7 +37,6 @@ module Data.X509.Ext (
     recognizedOIDs,
 ) where
 
-import Control.Applicative
 import Control.Monad
 import Data.ASN1.BinaryEncoding
 import Data.ASN1.BitArray

@@ -10,7 +10,6 @@ import Data.Word
 import Foreign.Ptr
 import Foreign.Storable
 
-import Control.Applicative
 import Control.Exception (catch)
 import Control.Monad (when)
 

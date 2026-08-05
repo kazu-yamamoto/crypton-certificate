@@ -17,7 +17,6 @@ module Data.X509.DistinguishedName (
     getDnElement,
 ) where
 
-import Control.Applicative
 #if MIN_VERSION_base(4,9,0)
 import           Data.Semigroup
 #else

@@ -15,8 +15,6 @@ module Data.X509.CRL (
     RevokedCertificate (..),
 ) where
 
-import Control.Applicative
-
 import Data.ASN1.Types
 import Data.Hourglass (DateTime, TimezoneOffset (..))
 

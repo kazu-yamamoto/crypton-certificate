@@ -19,11 +19,9 @@ import Data.X509.CertificateStore
 import System.Environment (getEnv)
 import System.X509.Common (maybeSSLCertEnvOr)
 
-import Control.Applicative ((<$>))
 import qualified Control.Exception as E
 
 import Data.Maybe (catMaybes)
-import Data.Monoid (mconcat)
 
 defaultSystemPaths :: [FilePath]
 defaultSystemPaths =

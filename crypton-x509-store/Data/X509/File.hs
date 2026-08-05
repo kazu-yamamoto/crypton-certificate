@@ -10,14 +10,11 @@ module Data.X509.File (
 #define MIN_VERSION_unix(x, y, z) 0
 #endif
 
-import Control.Applicative
 import Control.Exception (Exception (..), throw)
-import Data.ASN1.BinaryEncoding
-import Data.ASN1.Encoding
 import Data.ASN1.Types
 import qualified Data.ByteString.Lazy as L
 import Data.Maybe
-import Data.PEM (PEM, pemContent, pemName, pemParseLBS)
+import Data.PEM (PEM, pemContent, pemParseLBS)
 import qualified Data.X509 as X509
 import Data.X509.Memory (pemToKey)
 #if defined(MIN_VERSION_unix) && MIN_VERSION_unix(2,8,0)

@@ -1,7 +1,6 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-import Control.Applicative ((<$>))
 import Control.Monad
 import qualified Data.ByteArray as BA
 import qualified Data.ByteString as B

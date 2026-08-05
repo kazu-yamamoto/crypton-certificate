@@ -29,8 +29,6 @@ module Certificate (
     mkLeaf,
 ) where
 
-import Control.Applicative
-
 import Crypto.Hash.Algorithms
 import Crypto.Number.Serialize
 

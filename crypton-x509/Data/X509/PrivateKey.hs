@@ -12,9 +12,7 @@ module Data.X509.PrivateKey (
     privkeyToAlg,
 ) where
 
-import Control.Applicative (pure, (<$>))
 import Data.Maybe (fromMaybe)
-import Data.Word (Word)
 
 import Data.ByteArray (ByteArrayAccess, convert)
 import qualified Data.ByteString as B
