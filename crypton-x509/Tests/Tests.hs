@@ -17,6 +17,7 @@ import qualified Crypto.PubKey.Ed25519 as Ed25519
 import qualified Crypto.PubKey.Ed448 as Ed448
 import qualified Crypto.PubKey.RSA as RSA
 import Data.ASN1.Types
+import Data.Char (digitToInt)
 import Data.List (nub, sort)
 import Data.X509
 
@@ -250,6 +251,58 @@ property_extension_id e = case extDecode (extEncode e) of
         | v == e -> True
         | otherwise -> error ("expected " ++ show e ++ " got: " ++ show v)
 
+hexBS :: String -> B.ByteString
+hexBS = B.pack . go
+  where
+    go (hi : lo : xs) = fromIntegral (digitToInt hi * 16 + digitToInt lo) : go xs
+    go _ = []
+
+-- GeneralNames with a single directoryName, as encoded by OpenSSL:
+--   openssl req -x509 -newkey ed25519 \
+--     -subj "/CN=Vector Test" -addext "subjectAltName=dirName:dir_sect"
+--   with [dir_sect] C = JP, O = Example Org, CN = Directory Name Test
+-- The directoryName [4] tag is constructed (0xA4) because Name is a CHOICE,
+-- making the context tag EXPLICIT (RFC 5280 4.2.1.6 and appendix A.2).
+opensslDirNameSAN :: B.ByteString
+opensslDirNameSAN =
+    hexBS $
+        "3045A4433041310B3009060355040613024A5031143012060355040A0C0B"
+            ++ "4578616D706C65204F7267311C301A06035504030C134469726563746F72"
+            ++ "79204E616D652054657374"
+
+-- The same GeneralNames with directoryName under a primitive [4] tag (0x84),
+-- as produced by crypton-x509 1.9.1; still accepted when decoding for
+-- backward compatibility.
+legacyDirNameSAN :: B.ByteString
+legacyDirNameSAN =
+    hexBS $
+        "304584433041310B3009060355040613024A5031143012060355040A0C0B"
+            ++ "4578616D706C65204F7267311C301A06035504030C134469726563746F72"
+            ++ "79204E616D652054657374"
+
+dirNameDN :: DistinguishedName
+dirNameDN =
+    DistinguishedName
+        [ ([2, 5, 4, 6], asn1CharacterString Printable "JP")
+        , ([2, 5, 4, 10], asn1CharacterString UTF8 "Example Org")
+        , ([2, 5, 4, 3], asn1CharacterString UTF8 "Directory Name Test")
+        ]
+
+dirNameSAN :: ExtSubjectAltName
+dirNameSAN = ExtSubjectAltName [AltNameDN dirNameDN]
+
+case_dirname_decode_openssl :: Bool
+case_dirname_decode_openssl =
+    extDecodeBs opensslDirNameSAN == Right dirNameSAN
+
+case_dirname_encode_constructed :: Bool
+case_dirname_encode_constructed =
+    extEncodeBs dirNameSAN == opensslDirNameSAN
+
+case_dirname_decode_legacy_primitive :: Bool
+case_dirname_decode_legacy_primitive =
+    extDecodeBs legacyDirNameSAN == Right dirNameSAN
+
 main =
     defaultMain $
         testGroup
@@ -267,6 +320,18 @@ main =
                     , testProperty
                         "extended-key-usage"
                         (property_extension_id :: ExtExtendedKeyUsage -> Bool)
+                    ]
+                , testGroup
+                    "general-name-directoryname"
+                    [ testProperty
+                        "decodes-openssl-constructed"
+                        case_dirname_decode_openssl
+                    , testProperty
+                        "encodes-constructed"
+                        case_dirname_encode_constructed
+                    , testProperty
+                        "decodes-legacy-primitive"
+                        case_dirname_decode_legacy_primitive
                     ]
                 , testProperty
                     "extensions"

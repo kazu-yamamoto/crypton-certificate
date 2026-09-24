@@ -333,6 +333,18 @@ getAddr = do
         case n of
             (Other Context 1 b) -> return $ AltNameRFC822 $ BC.unpack b
             (Other Context 2 b) -> return $ AltNameDNS $ BC.unpack b
+            -- RFC 5280 4.2.1.6: directoryName [4] is EXPLICIT (constructed)
+            -- because Name is a CHOICE
+            (Start (Container Context 4)) -> do
+                dn <- getObject
+                n' <- getNext
+                case n' of
+                    End (Container Context 4) -> return $ AltNameDN dn
+                    _ ->
+                        throwParseError
+                            ("GeneralNames: expecting end of directoryName, got " ++ show n')
+            -- primitive [4] with nested DER, as emitted by crypton-x509
+            -- 1.9.1; accepted for backward compatibility
             (Other Context 4 b) -> case decodeASN1' DER b of
                 Left e1 -> throwParseError $ show e1
                 Right as -> case runParseASN1 getObject as of
@@ -352,7 +364,8 @@ encodeGeneralNames names =
 encodeAltName :: AltName -> [ASN1]
 encodeAltName (AltNameRFC822 n) = [Other Context 1 $ BC.pack n]
 encodeAltName (AltNameDNS n) = [Other Context 2 $ BC.pack n]
-encodeAltName (AltNameDN dn) = [Other Context 4 $ encodeASN1' DER $ toASN1 dn []]
+encodeAltName (AltNameDN dn) =
+    Start (Container Context 4) : toASN1 dn [End (Container Context 4)]
 encodeAltName (AltNameURI n) = [Other Context 6 $ BC.pack n]
 encodeAltName (AltNameIP n) = [Other Context 7 $ n]
 encodeAltName (AltNameXMPP n) =
