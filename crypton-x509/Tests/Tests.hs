@@ -250,6 +250,18 @@ property_extension_id e = case extDecode (extEncode e) of
         | v == e -> True
         | otherwise -> error ("expected " ++ show e ++ " got: " ++ show v)
 
+-- Per-family AlgorithmIdentifier parameters contract:
+-- ECDSA (RFC 5758 3.2, RFC 3279 2.2.3) and DSA (RFC 5758 3.1, RFC 3279
+-- 2.2.2) omit the parameters field; RSA PKCS#1 v1.5 encodes an ASN.1
+-- NULL (RFC 3279 2.2.1); EdDSA omits the field (RFC 8410 3).
+property_sig_alg_parameters :: SignatureALG -> Bool
+property_sig_alg_parameters alg@(SignatureALG _ pub)
+    | pub == PubKeyALG_EC || pub == PubKeyALG_DSA = Null `notElem` toASN1 alg []
+    | pub == PubKeyALG_RSA = Null `elem` toASN1 alg []
+property_sig_alg_parameters alg@(SignatureALG_IntrinsicHash _) =
+    Null `notElem` toASN1 alg []
+property_sig_alg_parameters _ = True
+
 main =
     defaultMain $
         testGroup
@@ -267,6 +279,12 @@ main =
                     , testProperty
                         "extended-key-usage"
                         (property_extension_id :: ExtExtendedKeyUsage -> Bool)
+                    ]
+                , testGroup
+                    "signature-alg-parameters"
+                    [ testProperty
+                        "per-family"
+                        property_sig_alg_parameters
                     ]
                 , testProperty
                     "extensions"
