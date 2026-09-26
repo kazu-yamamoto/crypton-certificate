@@ -1,5 +1,10 @@
 # ChangeLog for crypton-x509
 
+## 1.9.2
+
+* Stop printing EC private keys
+  [#34](https://github.com/kazu-yamamoto/crypton-certificate/pull/34)
+
 ## 1.9.1
 
 * Implementing the X509 name constrains extension.
