@@ -27,6 +27,7 @@ import Data.X509.AlgorithmIdentifier
 import Data.X509.OID (curvesOIDTable, lookupByOID, lookupOID)
 import Data.X509.PublicKey (SerializedPoint (..))
 
+import Crypto.Debug (DebugShow (..))
 import Crypto.Error (CryptoFailable (..))
 import Crypto.Number.Serialize (i2osp, os2ip)
 import qualified Crypto.PubKey.Curve25519 as X25519
@@ -55,7 +56,47 @@ data PrivKeyEC
         { privkeyEC_name :: ECC.CurveName
         , privkeyEC_priv :: Integer
         }
-    deriving (Show, Eq)
+    deriving (Eq)
+
+-- | The curve is shown; @privkeyEC_priv@ is not.  Use
+-- 'Crypto.Debug.debugShow' to see it.
+instance Show PrivKeyEC where
+    showsPrec = showsPrivKeyEC (showString "<secret>")
+
+instance DebugShow PrivKeyEC where
+    debugShow k = showsPrivKeyEC (shows $ privkeyEC_priv k) 0 k ""
+
+-- | What the two instances above share, so that a field added to
+-- 'PrivKeyEC' cannot reach one of them and not the other.  The first
+-- argument renders @privkeyEC_priv@; everything else is what @deriving
+-- Show@ used to write.
+showsPrivKeyEC :: ShowS -> Int -> PrivKeyEC -> ShowS
+showsPrivKeyEC priv d (PrivKeyEC_Prime _ a b p g o c s) =
+    showParen (d > 10) $
+        showString "PrivKeyEC_Prime {privkeyEC_priv = "
+            . priv
+            . showString ", privkeyEC_a = "
+            . shows a
+            . showString ", privkeyEC_b = "
+            . shows b
+            . showString ", privkeyEC_prime = "
+            . shows p
+            . showString ", privkeyEC_generator = "
+            . shows g
+            . showString ", privkeyEC_order = "
+            . shows o
+            . showString ", privkeyEC_cofactor = "
+            . shows c
+            . showString ", privkeyEC_seed = "
+            . shows s
+            . showChar '}'
+showsPrivKeyEC priv d (PrivKeyEC_Named n _) =
+    showParen (d > 10) $
+        showString "PrivKeyEC_Named {privkeyEC_name = "
+            . shows n
+            . showString ", privkeyEC_priv = "
+            . priv
+            . showChar '}'
 
 -- | Private key types known and used in X.509
 data PrivKey
@@ -74,6 +115,21 @@ data PrivKey
     | -- | Ed448 private key
       PrivKeyEd448 Ed448.SecretKey
     deriving (Show, Eq)
+
+-- | Rendering a private key with the key material in it, for the times when
+-- that is what is meant.  Each arm is @crypton@'s own 'debugShow' for that
+-- key type, except the EC one, which is this module's.
+instance DebugShow PrivKey where
+    debugShow k = case k of
+        PrivKeyRSA p -> con "PrivKeyRSA" $ debugShow p
+        PrivKeyDSA p -> con "PrivKeyDSA" $ debugShow p
+        PrivKeyEC p -> con "PrivKeyEC" $ debugShow p
+        PrivKeyX25519 p -> con "PrivKeyX25519" $ debugShow p
+        PrivKeyX448 p -> con "PrivKeyX448" $ debugShow p
+        PrivKeyEd25519 p -> con "PrivKeyEd25519" $ debugShow p
+        PrivKeyEd448 p -> con "PrivKeyEd448" $ debugShow p
+      where
+        con name body = name ++ " (" ++ body ++ ")"
 
 instance ASN1Object PrivKey where
     fromASN1 = privkeyFromASN1

@@ -9,15 +9,17 @@ import qualified Data.ByteString as B
 
 import Control.Monad
 
+import Crypto.Debug (DebugShow (..))
 import Crypto.Error (throwCryptoError)
 import qualified Crypto.PubKey.Curve25519 as X25519
 import qualified Crypto.PubKey.Curve448 as X448
 import qualified Crypto.PubKey.DSA as DSA
+import qualified Crypto.PubKey.ECC.Types as ECC
 import qualified Crypto.PubKey.Ed25519 as Ed25519
 import qualified Crypto.PubKey.Ed448 as Ed448
 import qualified Crypto.PubKey.RSA as RSA
 import Data.ASN1.Types
-import Data.List (nub, sort)
+import Data.List (isInfixOf, nub, sort)
 import Data.X509
 
 import Data.Hourglass
@@ -243,6 +245,30 @@ property_unmarshall_marshall_id o =
     got = fromASN1 oMarshalled
     oMarshalled = toASN1 o []
 
+-- | A scalar long enough that finding it in the rendered key cannot be an
+-- accident of the curve parameters beside it.
+newtype ECSecret = ECSecret Integer
+    deriving (Show)
+
+instance Arbitrary ECSecret where
+    arbitrary = ECSecret <$> choose (10 ^ (40 :: Int), 10 ^ (41 :: Int))
+
+-- | 'show' of an EC private key holds the curve and not the scalar, and
+-- 'debugShow' holds both.  The wrapper is checked too, since it is
+-- @Credential@ and @ServerParams@ that a program actually prints.
+property_ec_show_redacts :: ECSecret -> Bool
+property_ec_show_redacts (ECSecret d) = all ok [named, prime]
+  where
+    named = PrivKeyEC_Named ECC.SEC_p256r1 d
+    prime = PrivKeyEC_Prime d 1 2 3 (SerializedPoint B.empty) 4 1 5
+    digits = show d
+    ok k =
+        not (digits `isInfixOf` show k)
+            && not (digits `isInfixOf` show (PrivKeyEC k))
+            && "<secret>" `isInfixOf` show k
+            && digits `isInfixOf` debugShow k
+            && digits `isInfixOf` debugShow (PrivKeyEC k)
+
 property_extension_id :: (Show e, Eq e, Extension e) => e -> Bool
 property_extension_id e = case extDecode (extEncode e) of
     Left err -> error err
@@ -276,4 +302,7 @@ main =
                     (property_unmarshall_marshall_id :: Certificate -> Bool)
                 , testProperty "crl" (property_unmarshall_marshall_id :: CRL -> Bool)
                 ]
+            , testGroup
+                "show"
+                [testProperty "ec privkey is redacted" property_ec_show_redacts]
             ]
