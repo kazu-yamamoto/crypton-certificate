@@ -35,6 +35,7 @@ import qualified Crypto.PubKey.DSA as DSA
 import qualified Crypto.PubKey.ECC.Types as ECC
 import qualified Crypto.PubKey.Ed25519 as Ed25519
 import qualified Crypto.PubKey.Ed448 as Ed448
+import qualified Crypto.PubKey.MLDSA as MLDSA
 import qualified Crypto.PubKey.RSA.Types as RSA
 import Data.Word
 
@@ -82,6 +83,12 @@ data PubKey
       PubKeyEd25519 Ed25519.PublicKey
     | -- | Ed448 public key
       PubKeyEd448 Ed448.PublicKey
+    | -- | ML-DSA-44 public key
+      PubKeyMLDSA44 (MLDSA.VerificationKey MLDSA.MLDSA44)
+    | -- | ML-DSA-65 public key
+      PubKeyMLDSA65 (MLDSA.VerificationKey MLDSA.MLDSA65)
+    | -- | ML-DSA-87 public key
+      PubKeyMLDSA87 (MLDSA.VerificationKey MLDSA.MLDSA87)
     | -- | unrecognized format
       PubKeyUnknown OID B.ByteString
     deriving (Show, Eq)
@@ -182,6 +189,20 @@ instance ASN1Object PubKey where
             case xs of
                 End Sequence : BitString bits : End Sequence : xs2 -> decodeCF "Ed448" PubKeyEd448 bits xs2 Ed448.publicKey
                 _ -> Left ("fromASN1: X509.PubKey: unknown Ed448 format: " ++ show xs)
+        -- RFC 9881 Section 4: the parameters are absent and the BIT STRING
+        -- is the raw public key.
+        | pkalg == getObjectID PubKeyALG_MLDSA44 =
+            case xs of
+                End Sequence : BitString bits : End Sequence : xs2 -> decodeCF "ML-DSA-44" PubKeyMLDSA44 bits xs2 MLDSA.verificationKey
+                _ -> Left ("fromASN1: X509.PubKey: unknown ML-DSA-44 format: " ++ show xs)
+        | pkalg == getObjectID PubKeyALG_MLDSA65 =
+            case xs of
+                End Sequence : BitString bits : End Sequence : xs2 -> decodeCF "ML-DSA-65" PubKeyMLDSA65 bits xs2 MLDSA.verificationKey
+                _ -> Left ("fromASN1: X509.PubKey: unknown ML-DSA-65 format: " ++ show xs)
+        | pkalg == getObjectID PubKeyALG_MLDSA87 =
+            case xs of
+                End Sequence : BitString bits : End Sequence : xs2 -> decodeCF "ML-DSA-87" PubKeyMLDSA87 bits xs2 MLDSA.verificationKey
+                _ -> Left ("fromASN1: X509.PubKey: unknown ML-DSA-87 format: " ++ show xs)
         | otherwise = Left $ "fromASN1: unknown public key OID: " ++ show pkalg
       where
         decodeASN1Err format bits xs2 f =
@@ -221,6 +242,9 @@ pubkeyToAlg (PubKeyX25519 _) = PubKeyALG_X25519
 pubkeyToAlg (PubKeyX448 _) = PubKeyALG_X448
 pubkeyToAlg (PubKeyEd25519 _) = PubKeyALG_Ed25519
 pubkeyToAlg (PubKeyEd448 _) = PubKeyALG_Ed448
+pubkeyToAlg (PubKeyMLDSA44 _) = PubKeyALG_MLDSA44
+pubkeyToAlg (PubKeyMLDSA65 _) = PubKeyALG_MLDSA65
+pubkeyToAlg (PubKeyMLDSA87 _) = PubKeyALG_MLDSA87
 pubkeyToAlg (PubKeyUnknown oid _) = PubKeyALG_Unknown oid
 
 encodePK :: PubKey -> [ASN1]
@@ -258,6 +282,12 @@ encodePK key = asn1Container Sequence (encodeInner key)
     encodeInner (PubKeyEd25519 pubkey) =
         asn1Container Sequence [pkalg] ++ [BitString $ toBitArray (convert pubkey) 0]
     encodeInner (PubKeyEd448 pubkey) =
+        asn1Container Sequence [pkalg] ++ [BitString $ toBitArray (convert pubkey) 0]
+    encodeInner (PubKeyMLDSA44 pubkey) =
+        asn1Container Sequence [pkalg] ++ [BitString $ toBitArray (convert pubkey) 0]
+    encodeInner (PubKeyMLDSA65 pubkey) =
+        asn1Container Sequence [pkalg] ++ [BitString $ toBitArray (convert pubkey) 0]
+    encodeInner (PubKeyMLDSA87 pubkey) =
         asn1Container Sequence [pkalg] ++ [BitString $ toBitArray (convert pubkey) 0]
     encodeInner (PubKeyDH _) = error "encodeInner: unimplemented public key DH"
     encodeInner (PubKeyUnknown _ l) =

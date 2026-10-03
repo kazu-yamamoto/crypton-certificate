@@ -17,9 +17,14 @@ import qualified Crypto.PubKey.DSA as DSA
 import qualified Crypto.PubKey.ECC.Types as ECC
 import qualified Crypto.PubKey.Ed25519 as Ed25519
 import qualified Crypto.PubKey.Ed448 as Ed448
+import qualified Crypto.PubKey.MLDSA as MLDSA
 import qualified Crypto.PubKey.RSA as RSA
+import Data.ASN1.BinaryEncoding (DER (..))
+import Data.ASN1.Encoding (encodeASN1')
 import Data.ASN1.Types
+import Data.ByteArray (convert)
 import Data.List (isInfixOf, nub, sort)
+import Data.Proxy (Proxy (..))
 import Data.X509
 
 import Data.Hourglass
@@ -64,6 +69,9 @@ instance Arbitrary PubKey where
             , PubKeyX448 <$> arbitrary
             , PubKeyEd25519 <$> arbitrary
             , PubKeyEd448 <$> arbitrary
+            , PubKeyMLDSA44 . MLDSA.toPublic <$> arbitraryMLDSA (Proxy :: Proxy MLDSA.MLDSA44)
+            , PubKeyMLDSA65 . MLDSA.toPublic <$> arbitraryMLDSA (Proxy :: Proxy MLDSA.MLDSA65)
+            , PubKeyMLDSA87 . MLDSA.toPublic <$> arbitraryMLDSA (Proxy :: Proxy MLDSA.MLDSA87)
             ]
 
 instance Arbitrary RSA.PrivateKey where
@@ -102,7 +110,13 @@ instance Arbitrary PrivKey where
             , PrivKeyX448 <$> arbitrary
             , PrivKeyEd25519 <$> arbitrary
             , PrivKeyEd448 <$> arbitrary
+            , PrivKeyMLDSA44 <$> arbitraryMLDSA (Proxy :: Proxy MLDSA.MLDSA44)
+            , PrivKeyMLDSA65 <$> arbitraryMLDSA (Proxy :: Proxy MLDSA.MLDSA65)
+            , PrivKeyMLDSA87 <$> arbitraryMLDSA (Proxy :: Proxy MLDSA.MLDSA87)
             ]
+
+arbitraryMLDSA :: MLDSA.DSA p => proxy p -> Gen (MLDSA.SigningKey p)
+arbitraryMLDSA p = snd . throwCryptoError . MLDSA.keyPairFromSeed p <$> arbitraryBS 32 32
 
 instance Arbitrary HashALG where
     arbitrary =
@@ -134,6 +148,9 @@ instance Arbitrary SignatureALG where
             , SignatureALG HashSHA512 PubKeyALG_EC
             , SignatureALG_IntrinsicHash PubKeyALG_Ed25519
             , SignatureALG_IntrinsicHash PubKeyALG_Ed448
+            , SignatureALG_IntrinsicHash PubKeyALG_MLDSA44
+            , SignatureALG_IntrinsicHash PubKeyALG_MLDSA65
+            , SignatureALG_IntrinsicHash PubKeyALG_MLDSA87
             ]
 
 arbitraryBS r1 r2 = choose (r1, r2) >>= \l -> (B.pack <$> replicateM l arbitrary)
@@ -269,6 +286,59 @@ property_ec_show_redacts (ECSecret d) = all ok [named, prime]
             && digits `isInfixOf` debugShow k
             && digits `isInfixOf` debugShow (PrivKeyEC k)
 
+-- | RFC 9881 Section 6: an ML-DSA-44 private key in PKCS#8 is the seed,
+-- tagged [0], the expanded key, or both, and all three give one key.
+newtype MLDSASeed = MLDSASeed B.ByteString deriving (Show)
+
+instance Arbitrary MLDSASeed where
+    arbitrary = MLDSASeed <$> arbitraryBS 32 32
+
+mldsaPKCS8 :: [ASN1] -> Either String (PrivKey, [ASN1])
+mldsaPKCS8 inner =
+    fromASN1
+        [ Start Sequence
+        , IntVal 0
+        , Start Sequence
+        , OID [2, 16, 840, 1, 101, 3, 4, 3, 17]
+        , End Sequence
+        , OctetString (encodeASN1' DER inner)
+        , End Sequence
+        ]
+
+mldsaExpanded :: B.ByteString -> B.ByteString
+mldsaExpanded seed =
+    convert $
+        snd $
+            throwCryptoError $
+                MLDSA.keyPairFromSeed (Proxy :: Proxy MLDSA.MLDSA44) seed
+
+property_mldsa_forms :: MLDSASeed -> Bool
+property_mldsa_forms (MLDSASeed seed) =
+    all ((== Right expected) . fmap fst . mldsaPKCS8) forms
+  where
+    expanded = mldsaExpanded seed
+    expected =
+        PrivKeyMLDSA44 $
+            snd $
+                throwCryptoError $
+                    MLDSA.keyPairFromSeed (Proxy :: Proxy MLDSA.MLDSA44) seed
+    forms =
+        [ [Other Context 0 seed]
+        , [OctetString expanded]
+        , [Start Sequence, OctetString seed, OctetString expanded, End Sequence]
+        ]
+
+property_mldsa_mismatch :: MLDSASeed -> MLDSASeed -> Property
+property_mldsa_mismatch (MLDSASeed seed1) (MLDSASeed seed2) =
+    seed1 /= seed2 ==>
+        either (const True) (const False) $
+            mldsaPKCS8
+                [ Start Sequence
+                , OctetString seed1
+                , OctetString (mldsaExpanded seed2)
+                , End Sequence
+                ]
+
 property_extension_id :: (Show e, Eq e, Extension e) => e -> Bool
 property_extension_id e = case extDecode (extEncode e) of
     Left err -> error err
@@ -305,4 +375,9 @@ main =
             , testGroup
                 "show"
                 [testProperty "ec privkey is redacted" property_ec_show_redacts]
+            , testGroup
+                "ML-DSA private key"
+                [ testProperty "seed, expandedKey and both" property_mldsa_forms
+                , testProperty "both refused if they disagree" property_mldsa_mismatch
+                ]
             ]

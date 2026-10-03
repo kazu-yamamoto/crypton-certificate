@@ -64,8 +64,10 @@ test-suite test-x509
         bytestring,
         crypton,
         crypton-x509,
+        crypton-asn1-encoding,
         crypton-asn1-types,
         mtl,
+        ram,
         tasty,
         tasty-quickcheck,
         time-hourglass

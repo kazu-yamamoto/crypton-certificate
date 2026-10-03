@@ -117,6 +117,9 @@ showCertSmall signedCert = do
         X509.PubKeyX448 _ -> printf "public key: ECDH (curve448)\n"
         X509.PubKeyEd25519 _ -> printf "public key: EdDSA (edwards25519)\n"
         X509.PubKeyEd448 _ -> printf "public key: EdDSA (edwards448)\n"
+        X509.PubKeyMLDSA44 _ -> printf "public key: ML-DSA-44\n"
+        X509.PubKeyMLDSA65 _ -> printf "public key: ML-DSA-65\n"
+        X509.PubKeyMLDSA87 _ -> printf "public key: ML-DSA-87\n"
         X509.PubKeyUnknown oid ws -> printf "public key: unknown: %s\n" (show oid)
         pk -> printf "public key: %s\n" (show pk)
   where
@@ -181,6 +184,9 @@ showCert signedCert = do
         X509.PubKeyX448 pubkey -> showPubHexdump "X448" pubkey
         X509.PubKeyEd25519 pubkey -> showPubHexdump "Ed25519" pubkey
         X509.PubKeyEd448 pubkey -> showPubHexdump "Ed448" pubkey
+        X509.PubKeyMLDSA44 pubkey -> showPubHexdump "ML-DSA-44" pubkey
+        X509.PubKeyMLDSA65 pubkey -> showPubHexdump "ML-DSA-65" pubkey
+        X509.PubKeyMLDSA87 pubkey -> showPubHexdump "ML-DSA-87" pubkey
         X509.PubKeyUnknown oid ws -> do
             printf "public key unknown: %s\n" (show oid)
             printf "  raw bytes: %s\n" (show ws)
@@ -400,6 +406,12 @@ doKeyMain files = do
                 putStrLn "Ed25519 KEY" >> putStrLn (showPrivHexdump k)
             [X509.PrivKeyEd448 k] ->
                 putStrLn "Ed448 KEY" >> putStrLn (showPrivHexdump k)
+            [X509.PrivKeyMLDSA44 k] ->
+                putStrLn "ML-DSA-44 KEY" >> putStrLn (showPrivHexdump k)
+            [X509.PrivKeyMLDSA65 k] ->
+                putStrLn "ML-DSA-65 KEY" >> putStrLn (showPrivHexdump k)
+            [X509.PrivKeyMLDSA87 k] ->
+                putStrLn "ML-DSA-87 KEY" >> putStrLn (showPrivHexdump k)
             _ -> error "private key unknown"
 
 doSystemMain _ = do

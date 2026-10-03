@@ -13,6 +13,7 @@ module Data.X509.PrivateKey (
 ) where
 
 import Data.Maybe (fromMaybe)
+import Data.Proxy (Proxy (..))
 
 import Data.ByteArray (ByteArrayAccess, convert)
 import qualified Data.ByteString as B
@@ -36,6 +37,7 @@ import qualified Crypto.PubKey.DSA as DSA
 import qualified Crypto.PubKey.ECC.Types as ECC
 import qualified Crypto.PubKey.Ed25519 as Ed25519
 import qualified Crypto.PubKey.Ed448 as Ed448
+import qualified Crypto.PubKey.MLDSA as MLDSA
 import qualified Crypto.PubKey.RSA as RSA
 
 -- | Elliptic Curve Private Key
@@ -114,6 +116,12 @@ data PrivKey
       PrivKeyEd25519 Ed25519.SecretKey
     | -- | Ed448 private key
       PrivKeyEd448 Ed448.SecretKey
+    | -- | ML-DSA-44 private key
+      PrivKeyMLDSA44 (MLDSA.SigningKey MLDSA.MLDSA44)
+    | -- | ML-DSA-65 private key
+      PrivKeyMLDSA65 (MLDSA.SigningKey MLDSA.MLDSA65)
+    | -- | ML-DSA-87 private key
+      PrivKeyMLDSA87 (MLDSA.SigningKey MLDSA.MLDSA87)
     deriving (Show, Eq)
 
 -- | Rendering a private key with the key material in it, for the times when
@@ -128,6 +136,9 @@ instance DebugShow PrivKey where
         PrivKeyX448 p -> con "PrivKeyX448" $ debugShow p
         PrivKeyEd25519 p -> con "PrivKeyEd25519" $ debugShow p
         PrivKeyEd448 p -> con "PrivKeyEd448" $ debugShow p
+        PrivKeyMLDSA44 p -> con "PrivKeyMLDSA44" $ debugShow p
+        PrivKeyMLDSA65 p -> con "PrivKeyMLDSA65" $ debugShow p
+        PrivKeyMLDSA87 p -> con "PrivKeyMLDSA87" $ debugShow p
       where
         con name body = name ++ " (" ++ body ++ ")"
 
@@ -300,7 +311,12 @@ newcurveFromASN1
                                         CryptoFailed e -> err ("invalid secret key: " ++ show e)
                                 Right _ -> err "unexpected inner format"
                                 Left e -> err (show e)
-                        Nothing -> Left ("newcurveFromASN1: unexpected OID " ++ show oid)
+                        Nothing -> case getMLDSA oid of
+                            Just (name, parse) ->
+                                case decodeASN1' BER bs of
+                                    Right inner -> (\k -> (k, zs)) <$> parse inner
+                                    Left e -> Left (name ++ ".SigningKey.fromASN1: " ++ show e)
+                            Nothing -> Left ("newcurveFromASN1: unexpected OID " ++ show oid)
                 _ -> Left "newcurveFromASN1: unexpected end format"
         | otherwise = Left ("newcurveFromASN1: unexpected version: " ++ show v)
       where
@@ -309,9 +325,54 @@ newcurveFromASN1
         getP [1, 3, 101, 112] = Just ("Ed25519", fmap PrivKeyEd25519 . Ed25519.secretKey)
         getP [1, 3, 101, 113] = Just ("Ed448", fmap PrivKeyEd448 . Ed448.secretKey)
         getP _ = Nothing
+        getMLDSA [2, 16, 840, 1, 101, 3, 4, 3, 17] =
+            Just
+                ( "ML-DSA-44"
+                , mldsaFromASN1 (Proxy :: Proxy MLDSA.MLDSA44) PrivKeyMLDSA44 "ML-DSA-44"
+                )
+        getMLDSA [2, 16, 840, 1, 101, 3, 4, 3, 18] =
+            Just
+                ( "ML-DSA-65"
+                , mldsaFromASN1 (Proxy :: Proxy MLDSA.MLDSA65) PrivKeyMLDSA65 "ML-DSA-65"
+                )
+        getMLDSA [2, 16, 840, 1, 101, 3, 4, 3, 19] =
+            Just
+                ( "ML-DSA-87"
+                , mldsaFromASN1 (Proxy :: Proxy MLDSA.MLDSA87) PrivKeyMLDSA87 "ML-DSA-87"
+                )
+        getMLDSA _ = Nothing
         isValidVersion version = version >= 0 && version <= 1
 newcurveFromASN1 _ =
     Left "newcurveFromASN1: unexpected format"
+
+-- | The private key of RFC 9881 Section 6: a CHOICE of the seed, tagged
+-- [0], the expanded key, or both.  A seed is expanded into the key; with
+-- both, the expanded key must be what the seed expands to.
+mldsaFromASN1
+    :: MLDSA.DSA p
+    => proxy p
+    -> (MLDSA.SigningKey p -> PrivKey)
+    -> String
+    -> [ASN1]
+    -> Either String PrivKey
+mldsaFromASN1 p con name inner = case inner of
+    [Other Context 0 seed] -> fromSeed seed
+    [OctetString expanded] -> fromExpanded expanded
+    [Start Sequence, OctetString seed, OctetString expanded, End Sequence] -> do
+        k <- fromSeed seed
+        k' <- fromExpanded expanded
+        if k == k'
+            then Right k
+            else err "seed and expandedKey do not match"
+    _ -> err "unexpected inner format"
+  where
+    err s = Left (name ++ ".SigningKey.fromASN1: " ++ s)
+    fromSeed seed = case MLDSA.keyPairFromSeed p seed of
+        CryptoPassed (_, sk) -> Right $ con sk
+        CryptoFailed e -> err ("invalid seed: " ++ show e)
+    fromExpanded expanded = case MLDSA.signingKey expanded of
+        CryptoPassed sk -> Right $ con sk
+        CryptoFailed e -> err ("invalid expandedKey: " ++ show e)
 
 containerWithTag :: ASN1Tag -> [ASN1] -> ([ASN1], [ASN1])
 containerWithTag etag (Start (Container _ atag) : xs)
@@ -331,6 +392,11 @@ privkeyToASN1 (PrivKeyX25519 k) = newcurveToASN1 [1, 3, 101, 110] k
 privkeyToASN1 (PrivKeyX448 k) = newcurveToASN1 [1, 3, 101, 111] k
 privkeyToASN1 (PrivKeyEd25519 k) = newcurveToASN1 [1, 3, 101, 112] k
 privkeyToASN1 (PrivKeyEd448 k) = newcurveToASN1 [1, 3, 101, 113] k
+-- RFC 9881 Section 6 recommends the seed, which a SigningKey does not keep,
+-- so the expanded key is written.
+privkeyToASN1 (PrivKeyMLDSA44 k) = newcurveToASN1 (getObjectID PubKeyALG_MLDSA44) k
+privkeyToASN1 (PrivKeyMLDSA65 k) = newcurveToASN1 (getObjectID PubKeyALG_MLDSA65) k
+privkeyToASN1 (PrivKeyMLDSA87 k) = newcurveToASN1 (getObjectID PubKeyALG_MLDSA87) k
 
 rsaToASN1 :: RSA.PrivateKey -> ASN1S
 rsaToASN1 key =
@@ -439,3 +505,6 @@ privkeyToAlg (PrivKeyX25519 _) = PubKeyALG_X25519
 privkeyToAlg (PrivKeyX448 _) = PubKeyALG_X448
 privkeyToAlg (PrivKeyEd25519 _) = PubKeyALG_Ed25519
 privkeyToAlg (PrivKeyEd448 _) = PubKeyALG_Ed448
+privkeyToAlg (PrivKeyMLDSA44 _) = PubKeyALG_MLDSA44
+privkeyToAlg (PrivKeyMLDSA65 _) = PubKeyALG_MLDSA65
+privkeyToAlg (PrivKeyMLDSA87 _) = PubKeyALG_MLDSA87

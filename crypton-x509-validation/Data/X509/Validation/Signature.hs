@@ -20,6 +20,7 @@ import qualified Crypto.PubKey.ECC.ECDSA as ECDSA
 import qualified Crypto.PubKey.ECC.Types as ECC
 import qualified Crypto.PubKey.Ed25519 as Ed25519
 import qualified Crypto.PubKey.Ed448 as Ed448
+import qualified Crypto.PubKey.MLDSA as MLDSA
 import qualified Crypto.PubKey.RSA.PKCS15 as RSA
 import qualified Crypto.PubKey.RSA.PSS as PSS
 
@@ -142,12 +143,24 @@ verifySignature (SignatureALG_IntrinsicHash pubkeyALG) pubkey cdata signature
   where
     doVerify (PubKeyEd25519 key) = eddsa Ed25519.verify Ed25519.signature key
     doVerify (PubKeyEd448 key) = eddsa Ed448.verify Ed448.signature key
+    doVerify (PubKeyMLDSA44 key) = mldsa key
+    doVerify (PubKeyMLDSA65 key) = mldsa key
+    doVerify (PubKeyMLDSA87 key) = mldsa key
     doVerify _ = SignatureFailed SignatureUnimplemented
 
     eddsa verify toSig key =
         case toSig signature of
             CryptoPassed sig
                 | verify key cdata sig -> SignaturePass
+                | otherwise -> SignatureFailed SignatureInvalid
+            CryptoFailed _ -> SignatureFailed SignatureInvalid
+
+    -- RFC 9881 Section 3: the empty context string.
+    mldsa :: MLDSA.DSA p => MLDSA.VerificationKey p -> SignatureVerification
+    mldsa key =
+        case MLDSA.signature signature of
+            CryptoPassed sig
+                | MLDSA.verify key MLDSA.noContext cdata sig -> SignaturePass
                 | otherwise -> SignatureFailed SignatureInvalid
             CryptoFailed _ -> SignatureFailed SignatureInvalid
 
