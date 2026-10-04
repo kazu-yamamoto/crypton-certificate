@@ -349,7 +349,7 @@ newcurveFromASN1 _ =
 -- [0], the expanded key, or both.  A seed is expanded into the key; with
 -- both, the expanded key must be what the seed expands to.
 mldsaFromASN1
-    :: MLDSA.DSA p
+    :: MLDSA.MLDSA p
     => proxy p
     -> (MLDSA.SigningKey p -> PrivKey)
     -> String

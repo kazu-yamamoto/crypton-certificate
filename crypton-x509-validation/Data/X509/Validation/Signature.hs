@@ -156,7 +156,7 @@ verifySignature (SignatureALG_IntrinsicHash pubkeyALG) pubkey cdata signature
             CryptoFailed _ -> SignatureFailed SignatureInvalid
 
     -- RFC 9881 Section 3: the empty context string.
-    mldsa :: MLDSA.DSA p => MLDSA.VerificationKey p -> SignatureVerification
+    mldsa :: MLDSA.MLDSA p => MLDSA.VerificationKey p -> SignatureVerification
     mldsa key =
         case MLDSA.signature signature of
             CryptoPassed sig

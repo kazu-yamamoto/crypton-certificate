@@ -115,7 +115,7 @@ instance Arbitrary PrivKey where
             , PrivKeyMLDSA87 <$> arbitraryMLDSA (Proxy :: Proxy MLDSA.MLDSA87)
             ]
 
-arbitraryMLDSA :: MLDSA.DSA p => proxy p -> Gen (MLDSA.SigningKey p)
+arbitraryMLDSA :: MLDSA.MLDSA p => proxy p -> Gen (MLDSA.SigningKey p)
 arbitraryMLDSA p = snd . throwCryptoError . MLDSA.keyPairFromSeed p <$> arbitraryBS 32 32
 
 instance Arbitrary HashALG where
