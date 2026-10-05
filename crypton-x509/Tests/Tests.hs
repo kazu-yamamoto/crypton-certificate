@@ -110,13 +110,20 @@ instance Arbitrary PrivKey where
             , PrivKeyX448 <$> arbitrary
             , PrivKeyEd25519 <$> arbitrary
             , PrivKeyEd448 <$> arbitrary
-            , PrivKeyMLDSA44 <$> arbitraryMLDSA (Proxy :: Proxy MLDSA.MLDSA44)
-            , PrivKeyMLDSA65 <$> arbitraryMLDSA (Proxy :: Proxy MLDSA.MLDSA65)
-            , PrivKeyMLDSA87 <$> arbitraryMLDSA (Proxy :: Proxy MLDSA.MLDSA87)
+            , PrivKeyMLDSA44 <$> arbitraryPrivMLDSA (Proxy :: Proxy MLDSA.MLDSA44)
+            , PrivKeyMLDSA65 <$> arbitraryPrivMLDSA (Proxy :: Proxy MLDSA.MLDSA65)
+            , PrivKeyMLDSA87 <$> arbitraryPrivMLDSA (Proxy :: Proxy MLDSA.MLDSA87)
             ]
 
 arbitraryMLDSA :: MLDSA.MLDSA p => proxy p -> Gen (MLDSA.SigningKey p)
 arbitraryMLDSA p = snd . throwCryptoError . MLDSA.keyPairFromSeed p <$> arbitraryBS 32 32
+
+-- | All three forms are generated, so that the marshalling round trip
+-- covers each of them and not just whichever one this module would pick.
+arbitraryPrivMLDSA :: MLDSA.MLDSA p => proxy p -> Gen (PrivKeyMLDSA p)
+arbitraryPrivMLDSA p = do
+    form <- elements [MLDSAKeySeed, MLDSAKeyExpanded, MLDSAKeyBoth]
+    throwCryptoError . privkeyMLDSAFromSeed p form <$> arbitraryBS 32 32
 
 instance Arbitrary HashALG where
     arbitrary =
@@ -287,23 +294,26 @@ property_ec_show_redacts (ECSecret d) = all ok [named, prime]
             && digits `isInfixOf` debugShow (PrivKeyEC k)
 
 -- | RFC 9881 Section 6: an ML-DSA-44 private key in PKCS#8 is the seed,
--- tagged [0], the expanded key, or both, and all three give one key.
+-- tagged [0], the expanded key, or both.  All three give one signing key,
+-- and each is written back out as what it was read as.
 newtype MLDSASeed = MLDSASeed B.ByteString deriving (Show)
 
 instance Arbitrary MLDSASeed where
     arbitrary = MLDSASeed <$> arbitraryBS 32 32
 
+mldsaPKCS8ASN1 :: [ASN1] -> [ASN1]
+mldsaPKCS8ASN1 inner =
+    [ Start Sequence
+    , IntVal 0
+    , Start Sequence
+    , OID [2, 16, 840, 1, 101, 3, 4, 3, 17]
+    , End Sequence
+    , OctetString (encodeASN1' DER inner)
+    , End Sequence
+    ]
+
 mldsaPKCS8 :: [ASN1] -> Either String (PrivKey, [ASN1])
-mldsaPKCS8 inner =
-    fromASN1
-        [ Start Sequence
-        , IntVal 0
-        , Start Sequence
-        , OID [2, 16, 840, 1, 101, 3, 4, 3, 17]
-        , End Sequence
-        , OctetString (encodeASN1' DER inner)
-        , End Sequence
-        ]
+mldsaPKCS8 = fromASN1 . mldsaPKCS8ASN1
 
 mldsaExpanded :: B.ByteString -> B.ByteString
 mldsaExpanded seed =
@@ -312,21 +322,68 @@ mldsaExpanded seed =
             throwCryptoError $
                 MLDSA.keyPairFromSeed (Proxy :: Proxy MLDSA.MLDSA44) seed
 
-property_mldsa_forms :: MLDSASeed -> Bool
-property_mldsa_forms (MLDSASeed seed) =
-    all ((== Right expected) . fmap fst . mldsaPKCS8) forms
+-- | The three encodings of one seed, with the form each of them is.
+mldsaForms :: B.ByteString -> [(MLDSAKeyForm, [ASN1])]
+mldsaForms seed =
+    [ (MLDSAKeySeed, [Other Context 0 seed])
+    , (MLDSAKeyExpanded, [OctetString expanded])
+    ,
+        ( MLDSAKeyBoth
+        , [Start Sequence, OctetString seed, OctetString expanded, End Sequence]
+        )
+    ]
   where
     expanded = mldsaExpanded seed
-    expected =
+
+-- | Each form parses, and all three carry the one signing key the seed
+-- expands to.  The forms themselves stay apart: the parsed keys are three
+-- different values, because they are three different files.
+property_mldsa_forms :: MLDSASeed -> Bool
+property_mldsa_forms (MLDSASeed seed) =
+    map (fmap fst . mldsaPKCS8 . snd) (mldsaForms seed) == map (Right . expected) forms
+        && length (nub (map expected forms)) == 3
+  where
+    forms = map fst (mldsaForms seed)
+    expected form =
         PrivKeyMLDSA44 $
-            snd $
+            throwCryptoError $
+                privkeyMLDSAFromSeed (Proxy :: Proxy MLDSA.MLDSA44) form seed
+
+-- | Reading a key and writing it again gives back the bytes it came from,
+-- for each of the three forms.  This is what keeping the form is for: a
+-- key store that rewrites a file must not turn a seed into an expanded key
+-- behind the owner's back.
+property_mldsa_form_round_trip :: MLDSASeed -> Bool
+property_mldsa_form_round_trip (MLDSASeed seed) = all ok (mldsaForms seed)
+  where
+    ok (form, inner) = case mldsaPKCS8 inner of
+        Right (k, []) ->
+            toASN1 k [] == mldsaPKCS8ASN1 inner
+                && formOf k == Just form
+        _ -> False
+    formOf (PrivKeyMLDSA44 k) = Just (privkeyMLDSA_form k)
+    formOf _ = Nothing
+
+-- | 'show' of an ML-DSA private key holds neither the seed nor the key,
+-- and 'debugShow' holds both.
+property_mldsa_show_redacts :: MLDSASeed -> Bool
+property_mldsa_show_redacts (MLDSASeed seed) = all ok (map fst (mldsaForms seed))
+  where
+    hex = concatMap byte . B.unpack
+    byte w = [digit (w `div` 16), digit (w `mod` 16)]
+    digit n = "0123456789abcdef" !! fromIntegral n
+    ok form =
+        let k =
                 throwCryptoError $
-                    MLDSA.keyPairFromSeed (Proxy :: Proxy MLDSA.MLDSA44) seed
-    forms =
-        [ [Other Context 0 seed]
-        , [OctetString expanded]
-        , [Start Sequence, OctetString seed, OctetString expanded, End Sequence]
-        ]
+                    privkeyMLDSAFromSeed (Proxy :: Proxy MLDSA.MLDSA44) form seed
+            wrapped = PrivKeyMLDSA44 k
+            shown = show k ++ show wrapped
+            debugged = debugShow k ++ debugShow wrapped
+            expanded = hex (mldsaExpanded seed)
+         in not (hex seed `isInfixOf` shown)
+                && not (expanded `isInfixOf` shown)
+                && expanded `isInfixOf` debugged
+                && (form == MLDSAKeyExpanded || hex seed `isInfixOf` debugged)
 
 property_mldsa_mismatch :: MLDSASeed -> MLDSASeed -> Property
 property_mldsa_mismatch (MLDSASeed seed1) (MLDSASeed seed2) =
@@ -378,6 +435,10 @@ main =
             , testGroup
                 "ML-DSA private key"
                 [ testProperty "seed, expandedKey and both" property_mldsa_forms
+                , testProperty
+                    "each form is written back as itself"
+                    property_mldsa_form_round_trip
                 , testProperty "both refused if they disagree" property_mldsa_mismatch
+                , testProperty "is redacted" property_mldsa_show_redacts
                 ]
             ]

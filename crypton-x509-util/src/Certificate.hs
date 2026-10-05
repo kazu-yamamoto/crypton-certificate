@@ -269,6 +269,14 @@ showPrivHexdump privkey =
         [ "priv:   " ++ hexdump privkey
         ]
 
+-- | An ML-DSA key is written as its seed, its expanded key, or both, so
+-- what is dumped is what the file actually held.
+showMLDSAHexdump :: X509.PrivKeyMLDSA p -> String
+showMLDSAHexdump k =
+    unlines $
+        maybe [] (\s -> ["seed:   " ++ hexdump s]) (X509.privkeyMLDSA_seed k)
+            ++ ["priv:   " ++ hexdump (X509.privkeyMLDSA_key k)]
+
 showASN1 :: Int -> [ASN1] -> IO ()
 showASN1 at = prettyPrint at
   where
@@ -407,11 +415,11 @@ doKeyMain files = do
             [X509.PrivKeyEd448 k] ->
                 putStrLn "Ed448 KEY" >> putStrLn (showPrivHexdump k)
             [X509.PrivKeyMLDSA44 k] ->
-                putStrLn "ML-DSA-44 KEY" >> putStrLn (showPrivHexdump k)
+                putStrLn "ML-DSA-44 KEY" >> putStrLn (showMLDSAHexdump k)
             [X509.PrivKeyMLDSA65 k] ->
-                putStrLn "ML-DSA-65 KEY" >> putStrLn (showPrivHexdump k)
+                putStrLn "ML-DSA-65 KEY" >> putStrLn (showMLDSAHexdump k)
             [X509.PrivKeyMLDSA87 k] ->
-                putStrLn "ML-DSA-87 KEY" >> putStrLn (showPrivHexdump k)
+                putStrLn "ML-DSA-87 KEY" >> putStrLn (showMLDSAHexdump k)
             _ -> error "private key unknown"
 
 doSystemMain _ = do

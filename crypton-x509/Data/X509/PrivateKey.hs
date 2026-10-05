@@ -9,13 +9,20 @@
 module Data.X509.PrivateKey (
     PrivKey (..),
     PrivKeyEC (..),
+    PrivKeyMLDSA,
+    MLDSAKeyForm (..),
+    privkeyMLDSAFromSeed,
+    privkeyMLDSAFromKey,
+    privkeyMLDSA_key,
+    privkeyMLDSA_seed,
+    privkeyMLDSA_form,
     privkeyToAlg,
 ) where
 
 import Data.Maybe (fromMaybe)
 import Data.Proxy (Proxy (..))
 
-import Data.ByteArray (ByteArrayAccess, convert)
+import Data.ByteArray (ByteArrayAccess, ScrubbedBytes, convert)
 import qualified Data.ByteString as B
 
 import Data.ASN1.BinaryEncoding
@@ -28,7 +35,7 @@ import Data.X509.AlgorithmIdentifier
 import Data.X509.OID (curvesOIDTable, lookupByOID, lookupOID)
 import Data.X509.PublicKey (SerializedPoint (..))
 
-import Crypto.Debug (DebugShow (..))
+import Crypto.Debug (DebugShow (..), debugShowBytes)
 import Crypto.Error (CryptoFailable (..))
 import Crypto.Number.Serialize (i2osp, os2ip)
 import qualified Crypto.PubKey.Curve25519 as X25519
@@ -100,6 +107,112 @@ showsPrivKeyEC priv d (PrivKeyEC_Named n _) =
             . priv
             . showChar '}'
 
+-- | Which of the three forms of RFC 9881 Section 6 a private key was read
+-- as, and is written back out as.
+data MLDSAKeyForm
+    = -- | The seed alone, @seed@, which Section 6 recommends.
+      MLDSAKeySeed
+    | -- | The expanded key alone, @expandedKey@.
+      MLDSAKeyExpanded
+    | -- | Both together, @both@.
+      MLDSAKeyBoth
+    deriving (Show, Eq)
+
+-- | An ML-DSA private key.
+--
+-- RFC 9881 Section 6 writes one as the seed it was derived from, as the
+-- expanded key, or as both, and which of the three it was is part of the
+-- key here.  A key read from a file is therefore written back out as the
+-- same thing it came in as, rather than as whichever form this module
+-- happens to prefer.
+--
+-- The expanded key is there whatever the form: a seed is expanded as it is
+-- read, so 'privkeyMLDSA_key' always answers.  The seed is not, since a
+-- key written as @expandedKey@ does not carry one; 'privkeyMLDSA_seed' is
+-- a 'Maybe' for that reason, and a key whose seed was never on the wire
+-- cannot be given one back -- @crypton@'s
+-- @Crypto.PubKey.MLDSA.generateKeyPairAndSeed@ is where a seed that is to
+-- be kept has to be caught.
+--
+-- The constructors are not exported: a seed and an expanded key that do
+-- not belong together would be a key that signs with one and claims the
+-- other, so the only ways in are 'privkeyMLDSAFromSeed', which expands the
+-- seed itself, and 'privkeyMLDSAFromKey', which has no seed to disagree
+-- with.
+--
+-- Two keys are equal when they hold the same thing /in the same form/: the
+-- same key as a seed and as an expanded key are two different files, and
+-- the encoding round trip says so.
+data PrivKeyMLDSA p
+    = PrivKeyMLDSA_Seed ScrubbedBytes (MLDSA.SigningKey p)
+    | PrivKeyMLDSA_Expanded (MLDSA.SigningKey p)
+    | PrivKeyMLDSA_Both ScrubbedBytes (MLDSA.SigningKey p)
+    deriving (Eq)
+
+-- | What the two instances below share, so that a form added to
+-- 'PrivKeyMLDSA' cannot reach one of them and not the other.  The
+-- arguments render the seed and the key.
+showsPrivKeyMLDSA
+    :: (ScrubbedBytes -> String)
+    -> (MLDSA.SigningKey p -> String)
+    -> PrivKeyMLDSA p
+    -> String
+showsPrivKeyMLDSA seed key k = case k of
+    PrivKeyMLDSA_Seed s sk -> con "PrivKeyMLDSA_Seed" [seed s, key sk]
+    PrivKeyMLDSA_Expanded sk -> con "PrivKeyMLDSA_Expanded" [key sk]
+    PrivKeyMLDSA_Both s sk -> con "PrivKeyMLDSA_Both" [seed s, key sk]
+  where
+    con name as = unwords (name : map (\a -> "(" ++ a ++ ")") as)
+
+-- | The form is shown; neither the seed nor the key is.  Use
+-- 'Crypto.Debug.debugShow' to see them.
+instance Show (PrivKeyMLDSA p) where
+    show = showsPrivKeyMLDSA (const "<secret>") show
+
+instance DebugShow (PrivKeyMLDSA p) where
+    debugShow = showsPrivKeyMLDSA (debugShowBytes "seed") debugShow
+
+-- | Build a key from its seed, to be written back out in the given form.
+--
+-- The expanded key is derived here, so it cannot fail to be the one the
+-- seed belongs to.  Passing 'MLDSAKeyExpanded' throws the seed away, which
+-- is the way to turn a seed into a key that will be written without one.
+privkeyMLDSAFromSeed
+    :: (MLDSA.MLDSA p, ByteArrayAccess ba)
+    => proxy p -> MLDSAKeyForm -> ba -> CryptoFailable (PrivKeyMLDSA p)
+privkeyMLDSAFromSeed p form bs = case MLDSA.keyPairFromSeed p bs of
+    CryptoFailed e -> CryptoFailed e
+    CryptoPassed (_, sk) ->
+        CryptoPassed $ case form of
+            MLDSAKeySeed -> PrivKeyMLDSA_Seed seed sk
+            MLDSAKeyExpanded -> PrivKeyMLDSA_Expanded sk
+            MLDSAKeyBoth -> PrivKeyMLDSA_Both seed sk
+  where
+    seed = convert bs :: ScrubbedBytes
+
+-- | Build a key from the expanded key alone, which is what a key that was
+-- generated without keeping its seed has to be.
+privkeyMLDSAFromKey :: MLDSA.SigningKey p -> PrivKeyMLDSA p
+privkeyMLDSAFromKey = PrivKeyMLDSA_Expanded
+
+-- | The expanded key, whatever form the key is in.
+privkeyMLDSA_key :: PrivKeyMLDSA p -> MLDSA.SigningKey p
+privkeyMLDSA_key (PrivKeyMLDSA_Seed _ sk) = sk
+privkeyMLDSA_key (PrivKeyMLDSA_Expanded sk) = sk
+privkeyMLDSA_key (PrivKeyMLDSA_Both _ sk) = sk
+
+-- | The seed, for a key that has one.
+privkeyMLDSA_seed :: PrivKeyMLDSA p -> Maybe ScrubbedBytes
+privkeyMLDSA_seed (PrivKeyMLDSA_Seed s _) = Just s
+privkeyMLDSA_seed (PrivKeyMLDSA_Expanded _) = Nothing
+privkeyMLDSA_seed (PrivKeyMLDSA_Both s _) = Just s
+
+-- | The form the key will be written out in.
+privkeyMLDSA_form :: PrivKeyMLDSA p -> MLDSAKeyForm
+privkeyMLDSA_form (PrivKeyMLDSA_Seed _ _) = MLDSAKeySeed
+privkeyMLDSA_form (PrivKeyMLDSA_Expanded _) = MLDSAKeyExpanded
+privkeyMLDSA_form (PrivKeyMLDSA_Both _ _) = MLDSAKeyBoth
+
 -- | Private key types known and used in X.509
 data PrivKey
     = -- | RSA private key
@@ -117,11 +230,11 @@ data PrivKey
     | -- | Ed448 private key
       PrivKeyEd448 Ed448.SecretKey
     | -- | ML-DSA-44 private key
-      PrivKeyMLDSA44 (MLDSA.SigningKey MLDSA.MLDSA44)
+      PrivKeyMLDSA44 (PrivKeyMLDSA MLDSA.MLDSA44)
     | -- | ML-DSA-65 private key
-      PrivKeyMLDSA65 (MLDSA.SigningKey MLDSA.MLDSA65)
+      PrivKeyMLDSA65 (PrivKeyMLDSA MLDSA.MLDSA65)
     | -- | ML-DSA-87 private key
-      PrivKeyMLDSA87 (MLDSA.SigningKey MLDSA.MLDSA87)
+      PrivKeyMLDSA87 (PrivKeyMLDSA MLDSA.MLDSA87)
     deriving (Show, Eq)
 
 -- | Rendering a private key with the key material in it, for the times when
@@ -347,31 +460,32 @@ newcurveFromASN1 _ =
 
 -- | The private key of RFC 9881 Section 6: a CHOICE of the seed, tagged
 -- [0], the expanded key, or both.  A seed is expanded into the key; with
--- both, the expanded key must be what the seed expands to.
+-- both, the expanded key must be what the seed expands to.  Which of the
+-- three it was is kept, so that 'mldsaToASN1' writes back what was read.
 mldsaFromASN1
     :: MLDSA.MLDSA p
     => proxy p
-    -> (MLDSA.SigningKey p -> PrivKey)
+    -> (PrivKeyMLDSA p -> PrivKey)
     -> String
     -> [ASN1]
     -> Either String PrivKey
 mldsaFromASN1 p con name inner = case inner of
-    [Other Context 0 seed] -> fromSeed seed
-    [OctetString expanded] -> fromExpanded expanded
+    [Other Context 0 seed] -> con <$> fromSeed MLDSAKeySeed seed
+    [OctetString expanded] -> con . privkeyMLDSAFromKey <$> fromExpanded expanded
     [Start Sequence, OctetString seed, OctetString expanded, End Sequence] -> do
-        k <- fromSeed seed
-        k' <- fromExpanded expanded
-        if k == k'
-            then Right k
+        k <- fromSeed MLDSAKeyBoth seed
+        sk <- fromExpanded expanded
+        if privkeyMLDSA_key k == sk
+            then Right (con k)
             else err "seed and expandedKey do not match"
     _ -> err "unexpected inner format"
   where
     err s = Left (name ++ ".SigningKey.fromASN1: " ++ s)
-    fromSeed seed = case MLDSA.keyPairFromSeed p seed of
-        CryptoPassed (_, sk) -> Right $ con sk
+    fromSeed form seed = case privkeyMLDSAFromSeed p form seed of
+        CryptoPassed k -> Right k
         CryptoFailed e -> err ("invalid seed: " ++ show e)
     fromExpanded expanded = case MLDSA.signingKey expanded of
-        CryptoPassed sk -> Right $ con sk
+        CryptoPassed sk -> Right sk
         CryptoFailed e -> err ("invalid expandedKey: " ++ show e)
 
 containerWithTag :: ASN1Tag -> [ASN1] -> ([ASN1], [ASN1])
@@ -392,11 +506,9 @@ privkeyToASN1 (PrivKeyX25519 k) = newcurveToASN1 [1, 3, 101, 110] k
 privkeyToASN1 (PrivKeyX448 k) = newcurveToASN1 [1, 3, 101, 111] k
 privkeyToASN1 (PrivKeyEd25519 k) = newcurveToASN1 [1, 3, 101, 112] k
 privkeyToASN1 (PrivKeyEd448 k) = newcurveToASN1 [1, 3, 101, 113] k
--- RFC 9881 Section 6 recommends the seed, which a SigningKey does not keep,
--- so the expanded key is written.
-privkeyToASN1 (PrivKeyMLDSA44 k) = newcurveToASN1 (getObjectID PubKeyALG_MLDSA44) k
-privkeyToASN1 (PrivKeyMLDSA65 k) = newcurveToASN1 (getObjectID PubKeyALG_MLDSA65) k
-privkeyToASN1 (PrivKeyMLDSA87 k) = newcurveToASN1 (getObjectID PubKeyALG_MLDSA87) k
+privkeyToASN1 (PrivKeyMLDSA44 k) = mldsaToASN1 (getObjectID PubKeyALG_MLDSA44) k
+privkeyToASN1 (PrivKeyMLDSA65 k) = mldsaToASN1 (getObjectID PubKeyALG_MLDSA65) k
+privkeyToASN1 (PrivKeyMLDSA87 k) = mldsaToASN1 (getObjectID PubKeyALG_MLDSA87) k
 
 rsaToASN1 :: RSA.PrivateKey -> ASN1S
 rsaToASN1 key =
@@ -491,6 +603,31 @@ newcurveToASN1 oid key =
         , OctetString (encodeASN1' DER [OctetString $ convert key])
         , End Sequence
         ]
+
+-- | The inverse of 'mldsaFromASN1': the form the key is in is the form it
+-- is written in, so reading a key and writing it again gives back the
+-- bytes it came from.
+mldsaToASN1 :: OID -> PrivKeyMLDSA p -> ASN1S
+mldsaToASN1 oid k =
+    (++)
+        [ Start Sequence
+        , IntVal 0
+        , Start Sequence
+        , OID oid
+        , End Sequence
+        , OctetString (encodeASN1' DER inner)
+        , End Sequence
+        ]
+  where
+    inner = case k of
+        PrivKeyMLDSA_Seed s _ -> [Other Context 0 (convert s)]
+        PrivKeyMLDSA_Expanded sk -> [OctetString (convert sk)]
+        PrivKeyMLDSA_Both s sk ->
+            [ Start Sequence
+            , OctetString (convert s)
+            , OctetString (convert sk)
+            , End Sequence
+            ]
 
 mapLeft :: (a0 -> a1) -> Either a0 b -> Either a1 b
 mapLeft f (Left x) = Left (f x)
