@@ -364,6 +364,29 @@ property_mldsa_form_round_trip (MLDSASeed seed) = all ok (mldsaForms seed)
     formOf (PrivKeyMLDSA44 k) = Just (privkeyMLDSA_form k)
     formOf _ = Nothing
 
+-- | The seed caught at generation, written out and read back.
+--
+-- This is the whole point of the two halves: @crypton@'s
+-- 'MLDSA.generateKeyPairAndSeed' is the only way to keep the seed a key was
+-- made from, and the seed form of RFC 9881 Section 6 is where it goes.
+-- Nothing else here generates a key, so without this the two never meet.
+--
+-- The key the seed expands to is the one that was generated, the file reads
+-- back as what was written, and the file is shorter than the expanded key
+-- alone -- which is what writing the seed is for.
+property_mldsa_generated_seed :: Property
+property_mldsa_generated_seed = ioProperty $ do
+    (_, sk, seed) <- MLDSA.generateKeyPairAndSeed p
+    let k = throwCryptoError $ privkeyMLDSAFromSeed p MLDSAKeySeed seed
+        privkey = PrivKeyMLDSA44 k
+        encoded = toASN1 privkey []
+    return $
+        privkeyMLDSA_key k == sk
+            && fromASN1 encoded == Right (privkey, [])
+            && B.length (encodeASN1' DER encoded) < B.length (convert sk :: B.ByteString)
+  where
+    p = Proxy :: Proxy MLDSA.MLDSA44
+
 -- | 'show' of an ML-DSA private key holds neither the seed nor the key,
 -- and 'debugShow' holds both.
 property_mldsa_show_redacts :: MLDSASeed -> Bool
@@ -438,6 +461,9 @@ main =
                 , testProperty
                     "each form is written back as itself"
                     property_mldsa_form_round_trip
+                , testProperty
+                    "a generated seed survives the round trip"
+                    property_mldsa_generated_seed
                 , testProperty "both refused if they disagree" property_mldsa_mismatch
                 , testProperty "is redacted" property_mldsa_show_redacts
                 ]
