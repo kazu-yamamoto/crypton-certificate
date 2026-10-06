@@ -1,5 +1,5 @@
--- ML-DSA comes from crypton, and the version that has it is not released
--- yet.  Until it is, build against the tree beside this one.
+-- ML-DSA comes from crypton 2.1.8, which is not released yet.  Until it is,
+-- build against the tree beside this one.
 packages:
   ../crypton
   crypton-x509
