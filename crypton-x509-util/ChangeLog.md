@@ -1,5 +1,9 @@
 # ChangeLog for crypton-x509-util
 
+## 1.9.1
+
+* Show ML-DSA keys, with the seed when the file held one
+
 ## 1.9.0
 
 * Using "ram" instead of "memory"

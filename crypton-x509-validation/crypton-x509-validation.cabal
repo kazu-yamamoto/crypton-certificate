@@ -1,6 +1,6 @@
 cabal-version:      >=1.10
 name:               crypton-x509-validation
-version:            1.9.1
+version:            1.10.0
 license:            BSD3
 license-file:       LICENSE
 copyright:          Vincent Hanquez <vincent@snarc.org>
@@ -33,12 +33,15 @@ library
         base >=3 && <5,
         bytestring,
         containers,
-        crypton >=1.1 && < 2.2,
+        -- ML-DSA needs the crypton that first ships Crypto.PubKey.MLDSA;
+        -- that release has no number yet, so the lower bound cannot be
+        -- written and has to be set before this is released.
+        crypton >=1.1 && <2.3,
         crypton-asn1-types >=0.4.1 && <0.5,
         crypton-asn1-encoding >=0.10.0 && <0.11,
         crypton-pem >=0.2.4 && <0.4,
-        crypton-x509 >=1.9.1 && <1.10,
-        crypton-x509-store >=1.9.0 && <1.10,
+        crypton-x509 >=1.10 && <1.11,
+        crypton-x509-store >=1.10 && <1.11,
         data-default,
         iproute >=1.2.2,
         mtl,

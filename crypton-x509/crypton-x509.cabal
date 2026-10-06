@@ -1,6 +1,6 @@
 cabal-version:      >=1.10
 name:               crypton-x509
-version:            1.9.2
+version:            1.10.0
 license:            BSD3
 license-file:       LICENSE
 copyright:          Vincent Hanquez <vincent@snarc.org>
@@ -44,7 +44,10 @@ library
         base >=4.7 && <5,
         bytestring,
         containers,
-        crypton >=2.0 && <2.2,
+        -- ML-DSA needs the crypton that first ships Crypto.PubKey.MLDSA;
+        -- that release has no number yet, so the lower bound cannot be
+        -- written and has to be set before this is released.
+        crypton >=2.0 && <2.3,
         crypton-asn1-encoding >=0.10.0 && <0.11,
         crypton-asn1-parse >=0.10.0 && <0.11,
         crypton-asn1-types >=0.4.1 && <0.5,

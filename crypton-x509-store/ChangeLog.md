@@ -1,5 +1,10 @@
 # ChangeLog for crypton-x509-store
 
+## 1.10.0
+
+* Read ML-DSA private keys
+* Follow the breaking change in `crypton-x509` 1.10.0
+
 ## 1.9.0
 
 * Using "ram" instead of "memory"

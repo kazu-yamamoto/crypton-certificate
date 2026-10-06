@@ -1,5 +1,10 @@
 # ChangeLog for crypton-x509
 
+## 1.10.0
+
+* Support ML-DSA (RFC 9881)
+* An ML-DSA private key keeps the form it was written in
+
 ## 1.9.2
 
 * Stop printing EC private keys
