@@ -160,7 +160,7 @@ verifySignature (SignatureALG_IntrinsicHash pubkeyALG) pubkey cdata signature
     mldsa key =
         case MLDSA.signature signature of
             CryptoPassed sig
-                | MLDSA.verify key MLDSA.noContext cdata sig -> SignaturePass
+                | MLDSA.verify key MLDSA.emptyContext cdata sig -> SignaturePass
                 | otherwise -> SignatureFailed SignatureInvalid
             CryptoFailed _ -> SignatureFailed SignatureInvalid
 

@@ -214,9 +214,9 @@ doSign AlgEd25519 key msg =
     return $ convert $ Ed25519.sign key (Ed25519.toPublic key) msg
 doSign AlgEd448 key msg =
     return $ convert $ Ed448.sign key (Ed448.toPublic key) msg
-doSign AlgMLDSA44 key msg = convert <$> MLDSA.sign key MLDSA.noContext msg
-doSign AlgMLDSA65 key msg = convert <$> MLDSA.sign key MLDSA.noContext msg
-doSign AlgMLDSA87 key msg = convert <$> MLDSA.sign key MLDSA.noContext msg
+doSign AlgMLDSA44 key msg = convert <$> MLDSA.sign key MLDSA.emptyContext msg
+doSign AlgMLDSA65 key msg = convert <$> MLDSA.sign key MLDSA.emptyContext msg
+doSign AlgMLDSA87 key msg = convert <$> MLDSA.sign key MLDSA.emptyContext msg
 
 -- Certificate utilities --
 
