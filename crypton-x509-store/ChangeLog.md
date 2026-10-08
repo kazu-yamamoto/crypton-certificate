@@ -3,7 +3,9 @@
 ## 1.10.0
 
 * Read ML-DSA private keys
+  [#35](https://github.com/kazu-yamamoto/crypton-certificate/pull/35)
 * Follow the breaking change in `crypton-x509` 1.10.0
+  [#35](https://github.com/kazu-yamamoto/crypton-certificate/pull/35)
 
 ## 1.9.0
 

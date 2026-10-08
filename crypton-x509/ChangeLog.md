@@ -3,7 +3,9 @@
 ## 1.10.0
 
 * Support ML-DSA (RFC 9881)
+  [#35](https://github.com/kazu-yamamoto/crypton-certificate/pull/35)
 * An ML-DSA private key keeps the form it was written in
+  [#35](https://github.com/kazu-yamamoto/crypton-certificate/pull/35)
 
 ## 1.9.2
 

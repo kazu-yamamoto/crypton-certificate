@@ -1,7 +1,4 @@
--- ML-DSA comes from crypton 2.1.8, which is not released yet.  Until it is,
--- build against the tree beside this one.
 packages:
-  ../crypton
   crypton-x509
   crypton-x509-store
   crypton-x509-system
