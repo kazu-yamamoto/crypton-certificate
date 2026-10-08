@@ -20,12 +20,14 @@ import qualified Crypto.PubKey.Ed448 as Ed448
 import qualified Crypto.PubKey.MLDSA as MLDSA
 import qualified Crypto.PubKey.RSA as RSA
 import Data.ASN1.BinaryEncoding (DER (..))
-import Data.ASN1.Encoding (encodeASN1')
+import Data.ASN1.Encoding (decodeASN1', encodeASN1')
 import Data.ASN1.Types
 import Data.ByteArray (convert)
 import Data.List (isInfixOf, nub, sort)
 import Data.Proxy (Proxy (..))
 import Data.X509
+
+import MLDSAKeys
 
 import Data.Hourglass
 
@@ -387,6 +389,37 @@ property_mldsa_generated_seed = ioProperty $ do
   where
     p = Proxy :: Proxy MLDSA.MLDSA44
 
+-- | What another implementation writes, this one reads and writes back.
+--
+-- Everything else here encodes with this library and decodes with it again,
+-- which says the two halves agree and nothing about the bytes.  These keys
+-- were made by OpenSSL 3.6.4, so they say what no round trip can: that a
+-- PKCS#8 from the rest of the world parses, and that what goes back out is
+-- byte for byte what came in.
+--
+-- OpenSSL writes the @both@ form, which is also the case that has something
+-- to check -- the expanded key must be what the seed expands to, or the
+-- parse is refused.
+property_mldsa_openssl :: Bool
+property_mldsa_openssl = all ok keys
+  where
+    keys =
+        [ (opensslMLDSA44, "ML-DSA-44")
+        , (opensslMLDSA65, "ML-DSA-65")
+        , (opensslMLDSA87, "ML-DSA-87")
+        ]
+    ok (der, _) = case decodeASN1' DER der of
+        Left _ -> False
+        Right asn1 -> case fromASN1 asn1 :: Either String (PrivKey, [ASN1]) of
+            Right (k, []) ->
+                formOf k == Just MLDSAKeyBoth
+                    && encodeASN1' DER (toASN1 k []) == der
+            _ -> False
+    formOf (PrivKeyMLDSA44 k) = Just (privkeyMLDSA_form k)
+    formOf (PrivKeyMLDSA65 k) = Just (privkeyMLDSA_form k)
+    formOf (PrivKeyMLDSA87 k) = Just (privkeyMLDSA_form k)
+    formOf _ = Nothing
+
 -- | 'show' of an ML-DSA private key holds neither the seed nor the key,
 -- and 'debugShow' holds both.
 property_mldsa_show_redacts :: MLDSASeed -> Bool
@@ -464,6 +497,9 @@ main =
                 , testProperty
                     "a generated seed survives the round trip"
                     property_mldsa_generated_seed
+                , testProperty
+                    "a key OpenSSL wrote reads and writes back unchanged"
+                    (property_mldsa_openssl)
                 , testProperty "both refused if they disagree" property_mldsa_mismatch
                 , testProperty "is redacted" property_mldsa_show_redacts
                 ]
