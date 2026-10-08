@@ -1,6 +1,6 @@
 cabal-version:      >=1.10
 name:               crypton-x509
-version:            1.9.2
+version:            1.10.0
 license:            BSD3
 license-file:       LICENSE
 copyright:          Vincent Hanquez <vincent@snarc.org>
@@ -44,7 +44,7 @@ library
         base >=4.7 && <5,
         bytestring,
         containers,
-        crypton >=2.0 && <2.2,
+        crypton >=2.1.8 && <2.3,
         crypton-asn1-encoding >=0.10.0 && <0.11,
         crypton-asn1-parse >=0.10.0 && <0.11,
         crypton-asn1-types >=0.4.1 && <0.5,
@@ -56,6 +56,7 @@ library
 test-suite test-x509
     type:             exitcode-stdio-1.0
     main-is:          Tests.hs
+    other-modules:    MLDSAKeys
     hs-source-dirs:   Tests
     default-language: Haskell2010
     ghc-options:      -Wall -fno-warn-orphans -fno-warn-missing-signatures
@@ -64,8 +65,10 @@ test-suite test-x509
         bytestring,
         crypton,
         crypton-x509,
+        crypton-asn1-encoding,
         crypton-asn1-types,
         mtl,
+        ram,
         tasty,
         tasty-quickcheck,
         time-hourglass

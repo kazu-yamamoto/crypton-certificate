@@ -42,6 +42,12 @@ data PubKeyALG
       PubKeyALG_Ed25519
     | -- | EdDSA 448 signature algorithm
       PubKeyALG_Ed448
+    | -- | ML-DSA-44 signature algorithm (RFC 9881)
+      PubKeyALG_MLDSA44
+    | -- | ML-DSA-65 signature algorithm (RFC 9881)
+      PubKeyALG_MLDSA65
+    | -- | ML-DSA-87 signature algorithm (RFC 9881)
+      PubKeyALG_MLDSA87
     | -- | Diffie Hellman Public Key algorithm
       PubKeyALG_DH
     | -- | Unknown Public Key algorithm
@@ -66,6 +72,9 @@ instance OIDable PubKeyALG where
     getObjectID PubKeyALG_X448 = [1, 3, 101, 111]
     getObjectID PubKeyALG_Ed25519 = [1, 3, 101, 112]
     getObjectID PubKeyALG_Ed448 = [1, 3, 101, 113]
+    getObjectID PubKeyALG_MLDSA44 = [2, 16, 840, 1, 101, 3, 4, 3, 17]
+    getObjectID PubKeyALG_MLDSA65 = [2, 16, 840, 1, 101, 3, 4, 3, 18]
+    getObjectID PubKeyALG_MLDSA87 = [2, 16, 840, 1, 101, 3, 4, 3, 19]
     getObjectID PubKeyALG_DH = [1, 2, 840, 10046, 2, 1]
     getObjectID (PubKeyALG_Unknown oid) = oid
 
@@ -92,6 +101,18 @@ sig_table =
     , ([2, 16, 840, 1, 101, 3, 4, 3, 2], SignatureALG HashSHA256 PubKeyALG_DSA)
     , ([1, 3, 101, 112], SignatureALG_IntrinsicHash PubKeyALG_Ed25519)
     , ([1, 3, 101, 113], SignatureALG_IntrinsicHash PubKeyALG_Ed448)
+    ,
+        ( [2, 16, 840, 1, 101, 3, 4, 3, 17]
+        , SignatureALG_IntrinsicHash PubKeyALG_MLDSA44
+        )
+    ,
+        ( [2, 16, 840, 1, 101, 3, 4, 3, 18]
+        , SignatureALG_IntrinsicHash PubKeyALG_MLDSA65
+        )
+    ,
+        ( [2, 16, 840, 1, 101, 3, 4, 3, 19]
+        , SignatureALG_IntrinsicHash PubKeyALG_MLDSA87
+        )
     ]
 
 oidSig :: OID -> SignatureALG
@@ -115,7 +136,7 @@ instance ASN1Object SignatureALG where
     fromASN1 (Start Sequence : OID oid : Null : End Sequence : xs) =
         case oidSig oid of
             SignatureALG_IntrinsicHash _ ->
-                Left "fromASN1: X509.SignatureALG: EdDSA requires absent parameter"
+                Left "fromASN1: X509.SignatureALG: EdDSA and ML-DSA require absent parameter"
             signatureAlg -> Right (signatureAlg, xs)
     fromASN1 (Start Sequence : OID oid : End Sequence : xs) =
         Right (oidSig oid, xs)

@@ -997,6 +997,9 @@ main =
             , treeWithAlg "ECDSA" (AlgEC curveName hashSHA512)
             , treeWithAlg "Ed25519" AlgEd25519
             , treeWithAlg "Ed448" AlgEd448
+            , treeWithAlg "ML-DSA-44" AlgMLDSA44
+            , treeWithAlg "ML-DSA-65" AlgMLDSA65
+            , treeWithAlg "ML-DSA-87" AlgMLDSA87
             ]
   where
     pssParams = PSS.defaultPSSParams SHA224

@@ -1,5 +1,10 @@
 # ChangeLog for crypton-x509-system
 
+## 1.10.0
+
+* Follow the breaking change in `crypton-x509` 1.10.0
+  [#35](https://github.com/kazu-yamamoto/crypton-certificate/pull/35)
+
 ## 1.9.0
 
 * Using "ram" instead of "memory"
