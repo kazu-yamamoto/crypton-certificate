@@ -11,6 +11,7 @@ import qualified Crypto.PubKey.RSA as RSA
 import qualified Crypto.PubKey.RSA.PSS as PSS
 
 import Data.ASN1.BinaryEncoding (DER (..))
+import Data.ASN1.BitArray (toBitArray)
 import Data.ASN1.Encoding (encodeASN1')
 import Data.ASN1.Types
 
@@ -625,6 +626,128 @@ testExhaustive res cn hostname expected = testWithRes res caseName $ \rd -> do
     caseName = if null hostname then "empty" else hostname
     checks = defaultChecks{checkExhaustive = True}
 
+-- | Validates a chain against a store and checks only success or failure.
+assertPassOrFail
+    :: CertificateStore
+    -> ValidationChecks
+    -> HostName
+    -> [Pair pub priv]
+    -> Bool
+    -> Assertion
+assertPassOrFail store checks hostname ps pass = do
+    actual <- validate HashSHA256 defaultHooks checks store def ident chain
+    unless (null actual == pass) $
+        assertFailure $
+            (if pass then "expected success but got: " else "expected failure but got: ")
+                ++ show actual
+  where
+    ident = (hostname, fromString ":443")
+    chain = CertificateChain (map pairSignedCert ps)
+
+nameConstraints :: [AltName] -> [AltName] -> ExtensionRaw
+nameConstraints p e = mkExtension True $ ExtNameConstraints (map sub p) (map sub e)
+  where
+    sub a = GeneralSubtree a 0 Nothing
+
+caBC :: ExtensionRaw
+caBC = mkExtension True $ ExtBasicConstraints True Nothing
+
+sanExt :: [AltName] -> ExtensionRaw
+sanExt = mkExtension False . ExtSubjectAltName
+
+-- | Tests name constraints of an intermediate CA and an optional sub-CA
+-- against a leaf certificate.
+testNameConstraints
+    :: IO (RData pub priv)
+    -> TestName
+    -> [ExtensionRaw]
+    -- ^ Extensions of the CA in addition to basic constraints
+    -> Maybe [ExtensionRaw]
+    -- ^ Extensions of the sub-CA, if any
+    -> DistinguishedName
+    -- ^ Leaf subject
+    -> [ExtensionRaw]
+    -- ^ Leaf extensions
+    -> HostName
+    -> Bool
+    -- ^ Expected success
+    -> TestTree
+testNameConstraints res caseName caExts msubExts leafDN leafExts hostname pass =
+    testWithRes res caseName $ \rd -> do
+        ca <-
+            mkCertificate
+                2
+                30
+                (mkDn "NC CA")
+                (present rd)
+                (caBC : caExts)
+                (CA $ root rd)
+                (keys1 rd)
+        (issuer, chain) <- case msubExts of
+            Nothing -> return (ca, [ca])
+            Just subExts -> do
+                sub <-
+                    mkCertificate
+                        2
+                        31
+                        (mkDn "NC Sub CA")
+                        (present rd)
+                        (caBC : subExts)
+                        (CA ca)
+                        (keys2 rd)
+                return (sub, [sub, ca])
+        leaf <- mkCertificate 2 100 leafDN (present rd) leafExts (CA issuer) (keys3 rd)
+        assertPassOrFail (rootStore rd) defaultChecks hostname (leaf : chain) pass
+
+-- | A leaf whose subject equals the issuer is not exempt from the name
+-- constraints of a trust anchor.
+testSelfIssuedLeaf :: IO (RData pub priv) -> TestName -> TestTree
+testSelfIssuedLeaf res caseName = testWithRes res caseName $ \rd -> do
+    let exts = [caBC, nameConstraints [AltNameDNS "example.com"] []]
+    anchor <- mkCertificate 2 40 (mkDn "NC Root") (present rd) exts Self (keys1 rd)
+    leaf <-
+        mkCertificate
+            2
+            41
+            (mkDn "NC Root")
+            (present rd)
+            [sanExt [AltNameDNS "www.google.com"]]
+            (CA anchor)
+            (keys2 rd)
+    assertPassOrFail (mkStore [anchor]) defaultChecks "www.google.com" [leaf] False
+
+-- | Tests a CA or leaf with an extension that cannot be decoded.
+testMalformedExt
+    :: IO (RData pub priv)
+    -> TestName
+    -> Bool
+    -> ExtensionRaw
+    -> ValidationChecks
+    -> [FailedReason]
+    -> TestTree
+testMalformedExt res caseName onCA ext checks expected = testWithRes res caseName $ \rd -> do
+    ca <-
+        mkCertificate
+            2
+            50
+            (mkDn "Malformed CA")
+            (present rd)
+            ([ext | onCA] ++ [caBC | not (isBC ext)])
+            (CA $ root rd)
+            (keys1 rd)
+    leaf <-
+        mkCertificate
+            2
+            100
+            (mkDn "malformed")
+            (present rd)
+            ([ext | not onCA])
+            (CA ca)
+            (keys2 rd)
+    assertValidationResult rd checks "malformed" [leaf, ca] expected
+  where
+    isBC (ExtensionRaw oid _ _) = oid == [2, 5, 29, 19]
+
 -- | Signature verification with degenerate or oversized keys fails.
 testBadKeys :: TestTree
 testBadKeys =
@@ -659,6 +782,306 @@ testBadKeys =
                 (BS.pack [1])
                 @?= SignatureFailed SignatureInvalid
         ]
+
+-- | Regression tests that do not depend on the signature algorithm.
+treeRegression :: TestTree
+treeRegression = withResource (initData AlgEd25519) freeData $ \res ->
+    testGroup
+        "regression"
+        [ testGroup
+            "name-constraints"
+            [ testNameConstraints
+                res
+                "permitted"
+                [ncEx]
+                Nothing
+                leafDN
+                [sanExt [dns "www.example.com"]]
+                "www.example.com"
+                True
+            , testNameConstraints
+                res
+                "not permitted"
+                [ncEx]
+                Nothing
+                leafDN
+                [sanExt [dns "www.google.com"]]
+                "www.google.com"
+                False
+            , testNameConstraints
+                res
+                "sub-CA with excluded only"
+                [ncEx]
+                (Just [nameConstraints [] [dns "foo.invalid"]])
+                leafDN
+                [sanExt [dns "www.google.com"]]
+                "www.google.com"
+                False
+            , testNameConstraints
+                res
+                "sub-CA without constraints"
+                [ncEx]
+                (Just [])
+                leafDN
+                [sanExt [dns "www.example.com"]]
+                "www.example.com"
+                True
+            , testNameConstraints
+                res
+                "sub-CA without constraints (outside)"
+                [ncEx]
+                (Just [])
+                leafDN
+                [sanExt [dns "www.google.com"]]
+                "www.google.com"
+                False
+            , testNameConstraints
+                res
+                "sub-CA permitted outside"
+                [ncEx]
+                (Just [nameConstraints [dns "google.com"] []])
+                leafDN
+                [sanExt [dns "www.google.com"]]
+                "www.google.com"
+                False
+            , testNameConstraints
+                res
+                "CN fallback"
+                [ncEx]
+                Nothing
+                (mkDn "www.google.com")
+                []
+                "www.google.com"
+                False
+            , testNameConstraints
+                res
+                "CN fallback (permitted)"
+                [ncEx]
+                Nothing
+                (mkDn "www.example.com")
+                []
+                "www.example.com"
+                True
+            , testNameConstraints
+                res
+                "excluded upper case"
+                [nameConstraints [] [dns "google.com"]]
+                Nothing
+                leafDN
+                [sanExt [dns "WWW.GOOGLE.COM"]]
+                "www.google.com"
+                False
+            , testNameConstraints
+                res
+                "excluded by wildcard"
+                [nameConstraints [] [dns "www.example.com"]]
+                Nothing
+                leafDN
+                [sanExt [dns "*.example.com"]]
+                "www.example.com"
+                False
+            , testNameConstraints
+                res
+                "permitted upper case"
+                [nameConstraints [dns "EXAMPLE.com"] []]
+                Nothing
+                leafDN
+                [sanExt [dns "www.example.COM"]]
+                "www.example.com"
+                True
+            , testNameConstraints
+                res
+                "leading dot"
+                [nameConstraints [dns ".example.com"] []]
+                Nothing
+                leafDN
+                [sanExt [dns "www.example.com"]]
+                "www.example.com"
+                True
+            , testNameConstraints
+                res
+                "leading dot (apex)"
+                [nameConstraints [dns ".example.com"] []]
+                Nothing
+                leafDN
+                [sanExt [dns "example.com"]]
+                "example.com"
+                False
+            , testNameConstraints
+                res
+                "excluded IP"
+                [nameConstraints [] [ip [8, 8, 8, 8, 255, 255, 255, 255]]]
+                Nothing
+                leafDN
+                [sanExt [dns "www.example.com", ip [8, 8, 8, 8]]]
+                "www.example.com"
+                False
+            , testNameConstraints
+                res
+                "permitted IP"
+                [nameConstraints [ip [10, 0, 0, 0, 255, 0, 0, 0]] []]
+                Nothing
+                leafDN
+                [sanExt [dns "x.example", ip [10, 1, 2, 3]]]
+                "10.1.2.3"
+                True
+            , testNameConstraints
+                res
+                "not permitted IP"
+                [nameConstraints [ip [10, 0, 0, 0, 255, 0, 0, 0]] []]
+                Nothing
+                leafDN
+                [sanExt [dns "x.example", ip [11, 1, 2, 3]]]
+                "11.1.2.3"
+                False
+            , testNameConstraints
+                res
+                "IP not constrained by DNS"
+                [ncEx]
+                Nothing
+                leafDN
+                [sanExt [dns "www.example.com", ip [8, 8, 8, 8]]]
+                "8.8.8.8"
+                True
+            , testNameConstraints
+                res
+                "excluded email"
+                [nameConstraints [] [AltNameRFC822 "example.org"]]
+                Nothing
+                leafDN
+                [sanExt [dns "www.example.com", AltNameRFC822 "a@EXAMPLE.org"]]
+                "www.example.com"
+                False
+            , testNameConstraints
+                res
+                "excluded URI"
+                [nameConstraints [] [AltNameURI ".example.org"]]
+                Nothing
+                leafDN
+                [sanExt [dns "www.example.com", AltNameURI "https://www.example.org/"]]
+                "www.example.com"
+                False
+            , testNameConstraints
+                res
+                "permitted DN"
+                [nameConstraints [AltNameDN (mkDn "leaf")] []]
+                Nothing
+                leafDN
+                [sanExt [dns "www.example.com"]]
+                "www.example.com"
+                True
+            , testNameConstraints
+                res
+                "excluded DN"
+                [nameConstraints [] [AltNameDN (mkDn "LEAF")]]
+                Nothing
+                leafDN
+                [sanExt [dns "www.example.com"]]
+                "www.example.com"
+                False
+            , testNameConstraints
+                res
+                "unparsable"
+                [ncRegisteredID]
+                Nothing
+                leafDN
+                [sanExt [dns "www.google.com"]]
+                "www.google.com"
+                False
+            , testSelfIssuedLeaf res "self-issued leaf"
+            ]
+        , testGroup
+            "subject-alt-name"
+            [ testNameConstraints
+                res
+                "unknown names skipped"
+                []
+                Nothing
+                leafDN
+                [sanUnknown]
+                "www.example.com"
+                True
+            , testNameConstraints
+                res
+                "undecodable SAN"
+                []
+                Nothing
+                (mkDn "www.example.com")
+                [sanBroken]
+                "www.example.com"
+                False
+            ]
+        , testGroup
+            "malformed-extensions"
+            [ testMalformedExt
+                res
+                "CA key usage"
+                True
+                (raw [2, 5, 29, 15] [IntVal 1])
+                defaultChecks
+                [NotAllowedToSign]
+            , testMalformedExt
+                res
+                "CA basic constraints"
+                True
+                (raw [2, 5, 29, 19] [IntVal 1])
+                defaultChecks
+                [NotAnAuthority]
+            , testMalformedExt
+                res
+                "leaf key usage bit 9"
+                False
+                (raw [2, 5, 29, 15] [BitString (toBitArray (BS.pack [0x80, 0x40]) 6)])
+                defaultChecks
+                    { checkLeafKeyUsage = [KeyUsage_digitalSignature]
+                    , checkFQHN = False
+                    }
+                []
+            , testMalformedExt
+                res
+                "leaf extended key usage"
+                False
+                (raw [2, 5, 29, 37] [Start Sequence, IntVal 1, End Sequence])
+                defaultChecks
+                    { checkLeafKeyPurpose = [KeyUsagePurpose_ServerAuth]
+                    , checkFQHN = False
+                    }
+                [LeafKeyPurposeNotAllowed]
+            ]
+        , testBadKeys
+        ]
+  where
+    dns = AltNameDNS
+    ip = AltNameIP . BS.pack
+    leafDN = mkDn "leaf"
+    ncEx = nameConstraints [dns "example.com"] []
+    raw oid asn1 = ExtensionRaw oid True (encodeASN1' DER asn1)
+    ncRegisteredID =
+        raw
+            [2, 5, 29, 30]
+            [ Start Sequence
+            , Start (Container Context 0)
+            , Start Sequence
+            , Other Context 2 (fromString "example.com")
+            , End Sequence
+            , Start Sequence
+            , Other Context 8 (BS.pack [0x2a, 0x03])
+            , End Sequence
+            , End (Container Context 0)
+            , End Sequence
+            ]
+    sanUnknown =
+        ExtensionRaw [2, 5, 29, 17] False $
+            encodeASN1'
+                DER
+                [ Start Sequence
+                , Other Context 8 (BS.pack [0x2a, 0x03])
+                , Other Context 2 (fromString "www.example.com")
+                , End Sequence
+                ]
+    sanBroken =
+        ExtensionRaw [2, 5, 29, 17] False $
+            encodeASN1' DER [Start Sequence, IntVal 1, End Sequence]
 
 -- | All validation test cases.
 treeWithAlg :: TestName -> Alg pub priv -> TestTree
@@ -1040,7 +1463,7 @@ main =
             , treeWithAlg "ML-DSA-44" AlgMLDSA44
             , treeWithAlg "ML-DSA-65" AlgMLDSA65
             , treeWithAlg "ML-DSA-87" AlgMLDSA87
-            , testBadKeys
+            , treeRegression
             ]
   where
     pssParams = PSS.defaultPSSParams SHA224

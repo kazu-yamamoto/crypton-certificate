@@ -41,11 +41,12 @@ module Data.X509.Validation (
 import Control.Monad (when)
 import Data.ASN1.Types
 import Data.Bits
-import Data.ByteString (unpack)
+import Data.ByteString (ByteString, unpack)
+import qualified Data.ByteString as B
 import Data.Char (toLower)
 import Data.Default
 import Data.Hourglass
-import Data.IP (IPv4, IPv6, toIPv4, toIPv6)
+import Data.IP (IPv4, IPv6, fromIPv4, fromIPv6b, toIPv4, toIPv6)
 import Data.List
 import Data.Maybe
 import Data.Word (Word8)
@@ -53,6 +54,7 @@ import Data.X509
 import Data.X509.CertificateStore
 import Data.X509.Validation.Cache
 import Data.X509.Validation.Fingerprint
+import Data.X509.Validation.Internal (safeCharacterToString)
 import Data.X509.Validation.Signature
 import Data.X509.Validation.Types
 import Text.Read (readMaybe)
@@ -345,11 +347,13 @@ validatePure validationTime hooks checks store (fqhn, _) (CertificateChain (top 
                 ++ (if allowedDepth then [] else [AuthorityTooDeep])
       where
         extensions = certExtensions cert
-        allowedSign = case extensionGet extensions of
-            Just (ExtKeyUsage flags) -> KeyUsage_keyCertSign `elem` flags
+        -- an extension that cannot be decoded is not treated as absent
+        allowedSign = case extensionGetE extensions of
+            Just (Right (ExtKeyUsage flags)) -> KeyUsage_keyCertSign `elem` flags
+            Just (Left _) -> False
             Nothing -> True
-        (allowedCA, pathLen) = case extensionGet extensions of
-            Just (ExtBasicConstraints True pl) -> (True, pl)
+        (allowedCA, pathLen) = case extensionGetE extensions of
+            Just (Right (ExtBasicConstraints True pl)) -> (True, pl)
             _ -> (False, Nothing)
         allowedDepth = case pathLen of
             Nothing -> True
@@ -380,17 +384,20 @@ validatePure validationTime hooks checks store (fqhn, _) (CertificateChain (top 
                 (checkLeafKeyPurpose checks)
                 LeafKeyPurposeNotAllowed
       where
-        mflags = case extensionGet $ certExtensions cert of
-            Just (ExtKeyUsage keyflags) -> Just keyflags
+        mflags = case extensionGetE $ certExtensions cert of
+            Just (Right (ExtKeyUsage keyflags)) -> Just (Right keyflags)
+            Just (Left e) -> Just (Left e)
             Nothing -> Nothing
-        mpurposes = case extensionGet $ certExtensions cert of
-            Just (ExtExtendedKeyUsage keyPurposes) -> Just keyPurposes
+        mpurposes = case extensionGetE $ certExtensions cert of
+            Just (Right (ExtExtendedKeyUsage keyPurposes)) -> Just (Right keyPurposes)
+            Just (Left e) -> Just (Left e)
             Nothing -> Nothing
         -- compare a list of things to an expected list. the expected list
         -- need to be a subset of the list (if not Nothing), and is not will
-        -- return [err]
+        -- return [err]. An undecodable extension always fails.
         compareListIfExistAndNotNull Nothing _ _ = []
-        compareListIfExistAndNotNull (Just list) expected err
+        compareListIfExistAndNotNull (Just (Left _)) _ err = [err]
+        compareListIfExistAndNotNull (Just (Right list)) expected err
             | null expected = []
             | intersect expected list == expected = []
             | otherwise = [err]
@@ -410,48 +417,67 @@ validatePure validationTime hooks checks store (fqhn, _) (CertificateChain (top 
             SignaturePass -> []
             SignatureFailed r -> [InvalidSignature r]
 
+    -- Failures to build the chain are reported by 'doCheckChain'.
     doCheckNameConst :: SignedCertificate -> [SignedCertificate] -> [FailedReason]
-    doCheckNameConst current0 chain0 = case loop current0 chain0 [] of
+    doCheckNameConst current0 chain0 = case loop (0 :: Int) current0 chain0 [] of
         Left errs -> errs
         Right ts -> checkNameConstraints ts
       where
-        loop current chain acc = case findCertificate issuer store of
-            Just anchor -> Right $ getNameConstSpec (getCertificate anchor) True : spec : acc
+        loop level current chain acc = case findCertificate issuer store of
+            Just anchor -> Right $ getNameConstSpec (getCertificate anchor) False : spec : acc
             Nothing
-                | null chain -> Left [] -- to pass the test
+                | null chain -> Left []
                 | otherwise -> case findIssuer issuer chain of
-                    Nothing -> Left [] -- to pass the test
-                    Just (issuer', remaining) -> loop issuer' remaining (spec : acc)
+                    Nothing -> Left []
+                    Just (issuer', remaining) -> loop (level + 1) issuer' remaining (spec : acc)
           where
             cert = getCertificate current
             issuer = certIssuerDN cert
-            spec = getNameConstSpec cert (current0 /= current)
+            isLeaf = level == 0
+            spec = getNameConstSpec cert (isLeaf && checkFQHN checks)
 
 isSelfSigned :: Certificate -> Bool
 isSelfSigned cert = certSubjectDN cert == certIssuerDN cert
 
 data NameConstSpec = NameConstSpec
-    { ncSANs :: [AltName]
-    , ncExt :: Maybe ExtNameConstraints
-    , ncSelfSigned :: Bool
-    , ncCA :: Bool
+    { ncNames :: Either String [AltName]
+    -- ^ names subject to name constraints
+    , ncExt :: Either String (Maybe ExtNameConstraints)
+    , ncSelfIssued :: Bool
     }
 
+-- | The second argument tells whether the CN is used as a host name.
 getNameConstSpec :: Certificate -> Bool -> NameConstSpec
-getNameConstSpec cert ca =
+getNameConstSpec cert useCN =
     NameConstSpec
-        { ncSANs = sans
-        , ncExt = extensionGet exts
-        , ncSelfSigned = isSelfSigned cert
-        , ncCA = ca
+        { ncNames = names
+        , ncExt = maybe (Right Nothing) (fmap Just) $ extensionGetE exts
+        , ncSelfIssued = isSelfSigned cert
         }
   where
     exts = certExtensions cert
-    subj = AltNameDN $ certSubjectDN cert
-    sans :: [AltName]
-    sans = case extensionGet exts of
-        Nothing -> [subj]
-        Just (ExtSubjectAltName alts) -> subj : alts
+    subjDN = certSubjectDN cert
+    subj = [AltNameDN subjDN | not (null (getDistinguishedElements subjDN))]
+    -- RFC 5280: without SAN, emailAddress in the subject is an rfc822Name
+    emails =
+        [ AltNameRFC822 e
+        | (oid, v) <- getDistinguishedElements subjDN
+        , oid == [1, 2, 840, 113549, 1, 9, 1]
+        , Just e <- [safeCharacterToString v]
+        ]
+    cn
+        | useCN = case getNames cert of
+            Right (Just name, []) -> [maybe (AltNameDNS name) ipToAltName (parseIPAddress name)]
+            _ -> []
+        | otherwise = []
+    names = case extensionGetE exts of
+        Nothing -> Right (subj ++ emails ++ cn)
+        Just (Right (ExtSubjectAltName alts)) -> Right (subj ++ alts ++ cn)
+        Just (Left e) -> Left e
+
+ipToAltName :: IPAddress -> AltName
+ipToAltName (IPv4Address ip) = AltNameIP $ B.pack $ map fromIntegral $ fromIPv4 ip
+ipToAltName (IPv6Address ip) = AltNameIP $ B.pack $ map fromIntegral $ fromIPv6b ip
 
 -- | Validate that the current time is between validity bounds
 validateTime :: DateTime -> Certificate -> [FailedReason]
@@ -462,11 +488,14 @@ validateTime currentTime cert
   where
     (before, after) = certValidity cert
 
-getNames :: Certificate -> (Maybe String, [String])
-getNames cert = (commonName >>= asn1CharacterToString, altNames)
+-- | 'Left' if the SAN extension is present but cannot be decoded.
+getNames :: Certificate -> Either String (Maybe String, [String])
+getNames cert = case extensionGetE $ certExtensions cert of
+    Just (Left e) -> Left e
+    Just (Right san) -> Right (commonName, toAltName san)
+    Nothing -> Right (commonName, [])
   where
-    commonName = getDnElement DnCommonName $ certSubjectDN cert
-    altNames = maybe [] toAltName $ extensionGet $ certExtensions cert
+    commonName = getDnElement DnCommonName (certSubjectDN cert) >>= safeCharacterToString
     toAltName (ExtSubjectAltName names) = catMaybes $ map unAltName names
       where
         unAltName (AltNameDNS s) = Just s
@@ -514,11 +543,19 @@ parseIPAddress _ = Nothing
 -- subjectAltName are considered.  Otherwise, the commonName from the subjectDN
 -- is used.
 --
+-- If the subjectAltName extension cannot be decoded, the name never matches.
+--
 -- Note that DNS names in the subjectAltName are in IDNA A-label form. If the
 -- destination hostname is a UTF-8 name, it must be provided to the TLS context
 -- in (non-transitional) IDNA2008 A-label form.
 validateCertificateName :: HostName -> Certificate -> [FailedReason]
-validateCertificateName fqhn cert
+validateCertificateName fqhn cert = case getNames cert of
+    Left _ -> [NameMismatch fqhn]
+    Right names -> validateNames fqhn cert names
+
+validateNames
+    :: HostName -> Certificate -> (Maybe String, [String]) -> [FailedReason]
+validateNames fqhn cert (commonName, altNames)
     | not $ null altNames =
         case parseIPAddress fqhn of
             Nothing -> findMatch [] $ map matchDomain altNames
@@ -531,8 +568,6 @@ validateCertificateName fqhn cert
             Nothing -> [NoCommonName]
             Just cn -> findMatch [] $ [matchDomain cn]
   where
-    (commonName, altNames) = getNames cert
-
     findMatch :: [FailedReason] -> [[FailedReason]] -> [FailedReason]
     findMatch _ [] = [NameMismatch fqhn]
     findMatch _ ([] : _) = []
@@ -586,81 +621,164 @@ exhaustiveList isExhaustive ((performCheck, c) : cs)
     | performCheck = exhaustive isExhaustive c (exhaustiveList isExhaustive cs)
     | otherwise = exhaustiveList isExhaustive cs
 
+-- | Name constraints accumulated along the chain (RFC 5280 6.1):
+-- a name must be in a permitted subtree of every level that has one
+-- and must not be in any excluded subtree.
+data NameConstState = NameConstState [[GeneralSubtree]] [GeneralSubtree]
+
+-- | The first element is the trust anchor and the last is the leaf.
 checkNameConstraints :: [NameConstSpec] -> [FailedReason]
-checkNameConstraints xs0 = loop xs0
+checkNameConstraints [] = []
+checkNameConstraints (anchor : specs0) =
+    either id (\st -> loop st specs0) $ addNameConst (NameConstState [] []) anchor
   where
-    loop [] = []
-    loop [_] = []
-    loop [a, b] = check a b
-    loop (a : b : cs) =
-        check a b ++ case nextNameConstSpec a b of
-            Left errs -> errs
-            Right b' -> loop (b' : cs)
-
-    check ncs0 ncs1
-        | ncSelfSigned ncs1 = []
-        | otherwise = case ncExt ncs0 of
-            Nothing -> []
-            Just nc0 -> validateNamesInSubtrees (ncSANs ncs1) nc0
-
-nextNameConstSpec
-    :: NameConstSpec
-    -> NameConstSpec
-    -> Either [FailedReason] NameConstSpec
-nextNameConstSpec ncs0 ncs1
-    | not (ncCA ncs1) = Right ncs1
-    | otherwise = case stricter (ncExt ncs0) (ncExt ncs1) of
-        Left errs -> Left errs
-        Right mNC -> Right $ ncs1{ncExt = mNC}
-
-stricter
-    :: Maybe ExtNameConstraints -- issuer: should be looser
-    -> Maybe ExtNameConstraints -- should be stricter
-    -> Either [FailedReason] (Maybe ExtNameConstraints)
-stricter Nothing mnc = Right mnc
-stricter (Just x) Nothing = Left [InvalidName $ show x]
-stricter
-    (Just (ExtNameConstraints permitted0 excluded0))
-    (Just (ExtNameConstraints permitted1 excluded1))
-        | null errs =
-            Right $ Just $ ExtNameConstraints permitted1 (excluded1 ++ excluded0)
-        | otherwise = Left errs
+    loop _ [] = []
+    loop st (spec : specs) =
+        check ++ case specs of
+            [] -> []
+            _ -> either id (\st' -> loop st' specs) $ addNameConst st spec
       where
-        errs = strictCheck permitted0 permitted1
+        -- self-issued intermediates are exempt but the leaf is not
+        check
+            | ncSelfIssued spec && not (null specs) = []
+            | otherwise = validateNames' st (ncNames spec)
 
-strictCheck :: [GeneralSubtree] -> [GeneralSubtree] -> [FailedReason]
-strictCheck permitted0 permitted1 = concatMap f permitted1
-  where
-    f (GeneralSubtree a _ _)
-        | any (\g -> (a `isIncludedIn` g) == Just True) permitted0 = []
-        | otherwise = [InvalidName $ show a]
+addNameConst
+    :: NameConstState -> NameConstSpec -> Either [FailedReason] NameConstState
+addNameConst st@(NameConstState permitted excluded) spec = case ncExt spec of
+    Left e -> Left [InvalidName $ "NameConstraints: " ++ e]
+    Right Nothing -> Right st
+    Right (Just (ExtNameConstraints p e)) ->
+        Right $ NameConstState ([p | not (null p)] ++ permitted) (e ++ excluded)
 
-validateNamesInSubtrees :: [AltName] -> ExtNameConstraints -> [FailedReason]
-validateNamesInSubtrees altNames (ExtNameConstraints permitted excluded) =
+validateNames' :: NameConstState -> Either String [AltName] -> [FailedReason]
+validateNames' (NameConstState [] []) _ = []
+validateNames' _ (Left e) = [InvalidName $ "SubjectAltName: " ++ e]
+validateNames' (NameConstState permitted excluded) (Right altNames) =
     concatMap inc altNames ++ concatMap exc altNames
   where
     inc a
-        | nsMatch a permitted = []
+        | all (nsMatch a) permitted = []
         | otherwise = [InvalidName $ show a]
     exc a
         | nsNotMatch a excluded = []
         | otherwise = [InvalidName $ show a]
 
+data NameMatch = NotApplicable | Matched | NotMatched | Unsupported
+    deriving (Eq)
+
+-- | A permitted subtree list is satisfied if the name is in one of them
+-- or if none of them is of the same type as the name.
 nsMatch :: AltName -> [GeneralSubtree] -> Bool
-nsMatch a gs = any (== Just True) rs || all isNothing rs
+nsMatch a gs = any (== Matched) rs || all (== NotApplicable) rs
   where
-    rs = map (a `isIncludedIn`) gs
+    rs = map (matchSubtree False a) gs
 
 nsNotMatch :: AltName -> [GeneralSubtree] -> Bool
-nsNotMatch a gs = all (\g -> (a `isIncludedIn` g) /= Just True) gs
+nsNotMatch a = all ((`elem` [NotApplicable, NotMatched]) . matchSubtree True a)
 
-isIncludedIn :: AltName -> GeneralSubtree -> Maybe Bool
-isIncludedIn (AltNameDN nm0) (GeneralSubtree (AltNameDN nm1) _ _) = Just (nm0 == nm1)
-isIncludedIn (AltNameDNS nm0) (GeneralSubtree (AltNameDNS nm1) _ _) = Just (nm0 == nm1 || ('.' : nm1) `isSuffixOf` nm0)
--- isIncludedIn (AltNameRFC822 _) (GeneralSubtree  (AltNameRFC822 _) _ _)= undefined
--- isIncludedIn (AltNameURI _) (GeneralSubtree  (AltNameURI _) _ _)= undefined
--- isIncludedIn (AltNameIP _) (GeneralSubtree (AltNameIP _) _ _)= undefined
-isIncludedIn _ _ = Nothing
+-- | The first argument tells whether the subtree is an excluded one.
+-- Unsupported forms count as matched when excluded and as not matched
+-- when permitted.
+matchSubtree :: Bool -> AltName -> GeneralSubtree -> NameMatch
+matchSubtree isExcluded name (GeneralSubtree base _ _) = case (name, base) of
+    (AltNameDNS n, AltNameDNS c) ->
+        toMatch $ dnsInSubtree n c || (isExcluded && wildcardCovers n c)
+    (AltNameDN n, AltNameDN c) -> toMatch $ dnInSubtree n c
+    (AltNameIP n, AltNameIP c) -> ipInSubtree n c
+    (AltNameRFC822 n, AltNameRFC822 c) -> maybe Unsupported toMatch $ emailInSubtree n c
+    (AltNameURI n, AltNameURI c) -> maybe Unsupported (toMatch . (`hostInSubtree` c)) $ uriHost n
+    (AltNameXMPP _, AltNameXMPP _) -> Unsupported
+    (AltNameDNSSRV _, AltNameDNSSRV _) -> Unsupported
+    _ -> NotApplicable
+  where
+    toMatch b = if b then Matched else NotMatched
+
+-- | "example.com" covers itself and its subdomains, ".example.com" only
+-- its subdomains.  Compared case-insensitively.
+dnsInSubtree :: String -> String -> Bool
+dnsInSubtree n c
+    | null c' = True
+    | "." `isPrefixOf` c' = c' `isSuffixOf` n'
+    | otherwise = n' == c' || ('.' : c') `isSuffixOf` n'
+  where
+    n' = map toLower n
+    c' = map toLower c
+
+-- | Whether a wildcard name such as "*.example.com" may stand for a name
+-- in the subtree, e.g. "www.example.com".
+wildcardCovers :: String -> String -> Bool
+wildcardCovers n c = case stripPrefix "*." (map toLower n) of
+    Just rest ->
+        let c' = map toLower c
+            label = take (length c' - length rest - 1) c'
+         in not (null label)
+                && '.' `notElem` label
+                && ('.' : rest) `isSuffixOf` c'
+    Nothing -> False
+
+hostInSubtree :: String -> String -> Bool
+hostInSubtree h c
+    | "." `isPrefixOf` c' = c' `isSuffixOf` h'
+    | otherwise = h' == c'
+  where
+    h' = map toLower h
+    c' = map toLower c
+
+-- | "user@host" matches exactly, "host" matches all mailboxes on the host
+-- and ".example.com" all mailboxes on its subdomains.
+emailInSubtree :: String -> String -> Maybe Bool
+emailInSubtree n c = case breakAt n of
+    Just (local, host) -> Just $ case breakAt c of
+        Just (cLocal, cHost) -> local == cLocal && map toLower host == map toLower cHost
+        Nothing -> hostInSubtree host c
+    Nothing -> Nothing
+  where
+    breakAt x = case break (== '@') (reverse x) of
+        (rhost, '@' : rlocal) -> Just (reverse rlocal, reverse rhost)
+        _ -> Nothing
+
+-- | The host of a URI with an authority; 'Nothing' for IP literals.
+uriHost :: String -> Maybe String
+uriHost uri = case break (== ':') uri of
+    (_, ':' : '/' : '/' : rest) ->
+        let authority = takeWhile (`notElem` ("/?#" :: String)) rest
+            hostport = reverse $ takeWhile (/= '@') $ reverse authority
+            host = takeWhile (/= ':') hostport
+         in if null host || "[" `isPrefixOf` hostport || isJust (parseIPAddress host)
+                then Nothing
+                else Just host
+    _ -> Nothing
+
+-- | The subtree is a prefix of the name.  Attribute values are compared
+-- case-insensitively with whitespace folded.
+dnInSubtree :: DistinguishedName -> DistinguishedName -> Bool
+dnInSubtree (DistinguishedName n) (DistinguishedName c) =
+    length c <= length n && and (zipWith eq n c)
+  where
+    eq (o1, v1) (o2, v2) = o1 == o2 && norm v1 == norm v2
+    norm v = case safeCharacterToString v of
+        Just str -> Right $ unwords $ words $ map toLower str
+        Nothing -> Left v
+
+-- | An IPv4 or IPv6 address against an address with a mask.
+ipInSubtree :: ByteString -> ByteString -> NameMatch
+ipInSubtree n c
+    | B.length c /= 8 && B.length c /= 32 = Unsupported
+    | B.length n /= 4 && B.length n /= 16 = Unsupported
+    | 2 * B.length n /= B.length c = NotMatched
+    | otherwise =
+        if and
+            ( zipWith3
+                (\x a m -> x .&. m == a .&. m)
+                (B.unpack n)
+                (B.unpack addr)
+                (B.unpack mask)
+            )
+            then Matched
+            else NotMatched
+  where
+    (addr, mask) = B.splitAt (B.length n) c
 
 doCriticalExtensionSweep :: Certificate -> [FailedReason]
 doCriticalExtensionSweep cert = case mexts of
