@@ -1,5 +1,14 @@
 # ChangeLog for crypton-x509
 
+## 1.10.1
+
+* Decoding functions return `Left` instead of throwing on malformed
+  input (lazy decoder errors, unknown key usage bits, non-OID extended
+  key usage, CRL distribution points, invalid strings).
+* Fix the encoding of NameConstraints, which its own decoder could not
+  read, and of directoryName and dNSSRV GeneralNames.
+* SubjectAltName decoding skips unsupported GeneralName types.
+
 ## 1.10.0
 
 * Support ML-DSA (RFC 9881)

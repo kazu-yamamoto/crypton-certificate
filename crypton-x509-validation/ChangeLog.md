@@ -1,5 +1,18 @@
 # ChangeLog for crypton-x509-validation
 
+## 1.10.1
+
+* Fix name constraint bypasses: constraints are accumulated per RFC
+  5280, apply to the leaf even if self-issued and to the CN used as a
+  host name, dNSName matching is case-insensitive, and iPAddress,
+  rfc822Name, URI and directoryName constraints are enforced.
+* Undecodable NameConstraints, BasicConstraints, KeyUsage,
+  ExtendedKeyUsage and SubjectAltName extensions fail validation
+  instead of being ignored.
+* Reject degenerate DSA parameters and oversized RSA keys before
+  verifying signatures.
+* Limit the chain depth to 20 CA certificates.
+
 ## 1.10.0
 
 * Verify ML-DSA signatures
