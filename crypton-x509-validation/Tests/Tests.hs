@@ -716,6 +716,25 @@ testSelfIssuedLeaf res caseName = testWithRes res caseName $ \rd -> do
             (keys2 rd)
     assertPassOrFail (mkStore [anchor]) defaultChecks "www.google.com" [leaf] False
 
+-- | Tests a chain longer than the supported depth.
+testLongChain :: IO (RData pub priv) -> TestName -> Int -> Bool -> TestTree
+testLongChain res caseName len pass = testWithRes res caseName $ \rd -> do
+    let mk issuer i =
+            mkCertificate
+                2
+                (fromIntegral i)
+                (mkDn ("CA" ++ show i))
+                (present rd)
+                [caBC]
+                (CA issuer)
+                (keys1 rd)
+        go issuer i acc
+            | i > len = return (issuer, acc)
+            | otherwise = mk issuer i >>= \c -> go c (i + 1) (c : acc)
+    (lastCA, cas) <- go (root rd) (1 :: Int) []
+    leaf <- mkLeaf "long-chain" (present rd) (CA lastCA) (keys2 rd)
+    assertPassOrFail (rootStore rd) defaultChecks "long-chain" (leaf : cas) pass
+
 -- | Tests a CA or leaf with an extension that cannot be decoded.
 testMalformedExt
     :: IO (RData pub priv)
@@ -1047,6 +1066,11 @@ treeRegression = withResource (initData AlgEd25519) freeData $ \res ->
                     , checkFQHN = False
                     }
                 [LeafKeyPurposeNotAllowed]
+            ]
+        , testGroup
+            "chain-length"
+            [ testLongChain res "short" 5 True
+            , testLongChain res "too long" 25 False
             ]
         , testBadKeys
         ]

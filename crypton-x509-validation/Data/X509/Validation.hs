@@ -294,7 +294,13 @@ validatePure validationTime hooks checks store (fqhn, _) (CertificateChain (top 
 
     doCheckChain
         :: Int -> SignedCertificate -> [SignedCertificate] -> [FailedReason]
-    doCheckChain level current chain =
+    doCheckChain level current chain
+        | level > maxChainDepth = [AuthorityTooDeep]
+        | otherwise = doCheckChain' level current chain
+
+    doCheckChain'
+        :: Int -> SignedCertificate -> [SignedCertificate] -> [FailedReason]
+    doCheckChain' level current chain =
         doCheckCertificate (getCertificate current)
             -- check if we have a trusted certificate in the store belonging to this issuer.
             |> ( case findCertificate (certIssuerDN cert) store of
@@ -327,8 +333,9 @@ validatePure validationTime hooks checks store (fqhn, _) (CertificateChain (top 
                     | matchSubjectIdentifier issuerDN (getCertificate c) -> Just (c, cs)
                     | otherwise -> Nothing
         | otherwise =
-            (\x -> (x, filter (/= x) chain))
-                `fmap` find (matchSubjectIdentifier issuerDN . getCertificate) chain
+            case break (matchSubjectIdentifier issuerDN . getCertificate) chain of
+                (before, x : after) -> Just (x, before ++ after)
+                _ -> Nothing
     matchSubjectIdentifier :: DistinguishedName -> Certificate -> Bool
     matchSubjectIdentifier = hookMatchSubjectIssuer hooks
 
@@ -423,13 +430,15 @@ validatePure validationTime hooks checks store (fqhn, _) (CertificateChain (top 
         Left errs -> errs
         Right ts -> checkNameConstraints ts
       where
-        loop level current chain acc = case findCertificate issuer store of
-            Just anchor -> Right $ getNameConstSpec (getCertificate anchor) False : spec : acc
-            Nothing
-                | null chain -> Left []
-                | otherwise -> case findIssuer issuer chain of
-                    Nothing -> Left []
-                    Just (issuer', remaining) -> loop (level + 1) issuer' remaining (spec : acc)
+        loop level current chain acc
+            | level > maxChainDepth = Left []
+            | otherwise = case findCertificate issuer store of
+                Just anchor -> Right $ getNameConstSpec (getCertificate anchor) False : spec : acc
+                Nothing
+                    | null chain -> Left []
+                    | otherwise -> case findIssuer issuer chain of
+                        Nothing -> Left []
+                        Just (issuer', remaining) -> loop (level + 1) issuer' remaining (spec : acc)
           where
             cert = getCertificate current
             issuer = certIssuerDN cert
@@ -438,6 +447,10 @@ validatePure validationTime hooks checks store (fqhn, _) (CertificateChain (top 
 
 isSelfSigned :: Certificate -> Bool
 isSelfSigned cert = certSubjectDN cert == certIssuerDN cert
+
+-- | The maximum number of CA certificates followed from the leaf.
+maxChainDepth :: Int
+maxChainDepth = 20
 
 data NameConstSpec = NameConstSpec
     { ncNames :: Either String [AltName]
