@@ -32,13 +32,13 @@ data ExtensionRaw = ExtensionRaw
 
 tryExtRawASN1 :: ExtensionRaw -> Either String [ASN1]
 tryExtRawASN1 (ExtensionRaw oid _ content) =
-    case decodeASN1' BER content of
+    case safeDecode (decodeASN1' BER content) of
         Left err ->
             Left $
                 "fromASN1: X509.ExtensionRaw: OID="
                     ++ show oid
                     ++ ": cannot decode data: "
-                    ++ show err
+                    ++ err
         Right r -> Right r
 
 extRawASN1 :: ExtensionRaw -> [ASN1]

@@ -206,10 +206,10 @@ instance ASN1Object PubKey where
         | otherwise = Left $ "fromASN1: unknown public key OID: " ++ show pkalg
       where
         decodeASN1Err format bits xs2 f =
-            case decodeASN1' BER (bitArrayGetData bits) of
+            case safeDecode (decodeASN1' BER (bitArrayGetData bits)) of
                 Left err ->
                     Left
-                        ("fromASN1: X509.PubKey " ++ format ++ " bitarray cannot be parsed: " ++ show err)
+                        ("fromASN1: X509.PubKey " ++ format ++ " bitarray cannot be parsed: " ++ err)
                 Right s -> case f s of
                     Left err -> Left err
                     Right (r, xsinner) -> Right (r, xsinner ++ xs2)
@@ -328,8 +328,8 @@ rsaPubFromASN1
         | oid /= [1, 2, 840, 113549, 1, 1, 1] =
             Left "rsaPubFromASN1: invalid OID"
         | otherwise =
-            let inner = either strError rsaPubFromASN1 $ decodeASN1' BER bs
-                strError = Left . ("fromASN1: RSA.PublicKey: " ++) . show
+            let inner = either strError rsaPubFromASN1 $ safeDecode $ decodeASN1' BER bs
+                strError = Left . ("fromASN1: RSA.PublicKey: " ++)
              in either Left (\(k, _) -> Right (k, xs)) inner
 rsaPubFromASN1 _ =
     Left "fromASN1: RSA.PublicKey: unexpected format"

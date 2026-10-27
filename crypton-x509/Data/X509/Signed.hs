@@ -51,6 +51,7 @@ import Data.ASN1.Types
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as B
 import Data.X509.AlgorithmIdentifier
+import Data.X509.Internal (safeDecode)
 
 -- | Represent a signed object using a traditional X509 structure.
 --
@@ -165,7 +166,7 @@ decodeSignedObject
     :: (Show a, Eq a, ASN1Object a)
     => ByteString
     -> Either String (SignedExact a)
-decodeSignedObject b = either (Left . show) parseSigned $ decodeASN1Repr' BER b
+decodeSignedObject b = either Left parseSigned $ safeDecode $ decodeASN1Repr' BER b
   where
     -- the following implementation is very inefficient.
     -- uses reverse and containing, move to a better solution eventually

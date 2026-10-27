@@ -49,6 +49,7 @@ import Data.List (find)
 import Data.Proxy
 import Data.X509.DistinguishedName
 import Data.X509.ExtensionRaw
+import Data.X509.Internal (safeCharacterToString, safeDecode)
 
 -- | key usage flag that is found in the key usage extension field.
 data ExtKeyUsageFlag
@@ -86,7 +87,7 @@ class Extension a where
     extDecode :: [ASN1] -> Either String a
 
     extDecodeBs :: B.ByteString -> Either String a
-    extDecodeBs = (either (Left . show) Right . decodeASN1' BER) >=> extDecode
+    extDecodeBs = (safeDecode . decodeASN1' BER) >=> extDecode
 
     extEncodeBs :: a -> B.ByteString
     extEncodeBs = encodeASN1' DER . extEncode
@@ -157,7 +158,8 @@ instance Extension ExtKeyUsage where
     extOID = const [2, 5, 29, 15]
     extHasNestedASN1 = const True
     extEncode (ExtKeyUsage flags) = [BitString $ flagsToBits flags]
-    extDecode [BitString bits] = Right $ ExtKeyUsage $ bitsToFlags bits
+    extDecode [BitString bits] =
+        Right $ ExtKeyUsage $ bitsToFlags KeyUsage_decipherOnly bits
     extDecode _ = Left "unknown sequence"
 
 -- | Key usage purposes for the ExtendedKeyUsage extension
@@ -204,7 +206,7 @@ instance Extension ExtExtendedKeyUsage where
                         case n of
                             OID o ->
                                 return $ maybe (KeyUsagePurpose_Unknown o) id $ lookup o extKeyUsagePurposedOID
-                            _ -> error "invalid content in extended key usage"
+                            _ -> throwParseError "invalid content in extended key usage"
                    )
 
 -- | Provide a way to identify a public key by a short hash.
@@ -287,7 +289,7 @@ instance Extension ExtCrlDistributionPoints where
     extOID _ = [2, 5, 29, 31]
     extHasNestedASN1 = const True
     extEncode = error "extEncode ExtCrlDistributionPoints unimplemented"
-    extDecode = error "extDecode ExtCrlDistributionPoints unimplemented"
+    extDecode _ = Left "extDecode ExtCrlDistributionPoints unimplemented"
 
 -- extEncode (ExtCrlDistributionPoints )
 
@@ -309,7 +311,7 @@ getAddr = do
                 c <- getNextContainerMaybe (Container Context 0)
                 case c of
                     Just [ASN1String cs] ->
-                        case asn1CharacterToString cs of
+                        case safeCharacterToString cs of
                             Nothing -> throwParseError ("GeneralNames: invalid string for XMPP Addr")
                             Just s -> return $ AltNameXMPP s
                     _ ->
@@ -319,7 +321,7 @@ getAddr = do
                 c <- getNextContainerMaybe (Container Context 0)
                 case c of
                     Just [ASN1String cs] ->
-                        case asn1CharacterToString cs of
+                        case safeCharacterToString cs of
                             Nothing -> throwParseError ("GeneralNames: invalid string for DNSSrv Addr")
                             Just s -> return $ AltNameDNSSRV s
                     _ ->
@@ -333,8 +335,8 @@ getAddr = do
         case n of
             (Other Context 1 b) -> return $ AltNameRFC822 $ BC.unpack b
             (Other Context 2 b) -> return $ AltNameDNS $ BC.unpack b
-            (Other Context 4 b) -> case decodeASN1' DER b of
-                Left e1 -> throwParseError $ show e1
+            (Other Context 4 b) -> case safeDecode (decodeASN1' DER b) of
+                Left e1 -> throwParseError e1
                 Right as -> case runParseASN1 getObject as of
                     Right dn -> return $ AltNameDN dn
                     Left e2 -> throwParseError e2
@@ -372,10 +374,14 @@ encodeAltName (AltNameDNSSRV n) =
     , End (Container Context 0)
     ]
 
-bitsToFlags :: Enum a => BitArray -> [a]
-bitsToFlags bits = concat $ flip map [0 .. (bitArrayLength bits - 1)] $ \i -> do
-    let isSet = bitArrayGetBit bits i
-    if isSet then [toEnum $ fromIntegral i] else []
+-- | Bits beyond the last known flag (the first argument) or beyond the
+-- actual data (a bogus length) are ignored.
+bitsToFlags :: Enum a => a -> BitArray -> [a]
+bitsToFlags lastFlag bits =
+    [toEnum (fromIntegral i) | len > 0, i <- [0 .. len - 1], bitArrayGetBit bits i]
+  where
+    dataLen = 8 * fromIntegral (B.length (bitArrayGetData bits))
+    len = minimum [bitArrayLength bits, dataLen, fromIntegral (fromEnum lastFlag) + 1]
 
 flagsToBits :: Enum a => [a] -> BitArray
 flagsToBits flags = foldl bitArraySetBit bitArrayEmpty $ map (fromIntegral . fromEnum) flags

@@ -20,6 +20,7 @@ import qualified Crypto.PubKey.Ed448 as Ed448
 import qualified Crypto.PubKey.MLDSA as MLDSA
 import qualified Crypto.PubKey.RSA as RSA
 import Data.ASN1.BinaryEncoding (DER (..))
+import Data.ASN1.BitArray (toBitArray)
 import Data.ASN1.Encoding (decodeASN1', encodeASN1')
 import Data.ASN1.Types
 import Data.ByteArray (convert)
@@ -452,6 +453,56 @@ property_mldsa_mismatch (MLDSASeed seed1) (MLDSASeed seed2) =
                 , End Sequence
                 ]
 
+-- Unknown key usage bits and a bogus bit string length are ignored.
+property_key_usage_unknown_bits :: Bool
+property_key_usage_unknown_bits =
+    extDecode [BitString (toBitArray (B.pack [0x80, 0x40]) 6)]
+        == Right (ExtKeyUsage [KeyUsage_digitalSignature])
+        && extDecode [BitString (toBitArray B.empty 7)] == Right (ExtKeyUsage [])
+
+property_malformed_extensions :: Bool
+property_malformed_extensions =
+    isLeft
+        ( extDecode [Start Sequence, IntVal 1, End Sequence]
+            :: Either String ExtExtendedKeyUsage
+        )
+        && isLeft
+            ( extDecode [Start Sequence, End Sequence]
+                :: Either String ExtCrlDistributionPoints
+            )
+  where
+    isLeft = either (const True) (const False)
+
+-- A certificate whose validity cannot be decoded is rejected with 'Left'
+-- rather than an exception thrown lazily from the decoder.
+property_lazy_decode_error :: Bool
+property_lazy_decode_error =
+    case decodeSignedCertificate corrupted of
+        Left e -> length e > 0
+        Right _ -> False
+  where
+    t = timeConvert (Date 2020 January 1) :: DateTime
+    dn = DistinguishedName [(getObjectID DnCommonName, asn1CharacterString UTF8 "x")]
+    cert =
+        Certificate
+            2
+            1
+            (SignatureALG HashSHA256 PubKeyALG_RSA)
+            dn
+            (t, t)
+            dn
+            (PubKeyRSA (RSA.PublicKey 1 0x7f 3))
+            (Extensions Nothing)
+    encoded =
+        encodeSignedObject $
+            fst $
+                objectToSignedExact
+                    (\_ -> (B.pack [1], SignatureALG HashSHA256 PubKeyALG_RSA, ()))
+                    cert
+    -- replace the first character of the first UTCTime with a non-ASCII byte
+    (before, after) = B.breakSubstring (B.pack [0x17, 0x0d]) encoded
+    corrupted = before <> B.pack [0x17, 0x0d, 0xff] <> B.drop 3 after
+
 property_extension_id :: (Show e, Eq e, Extension e) => e -> Bool
 property_extension_id e = case extDecode (extEncode e) of
     Left err -> error err
@@ -476,6 +527,12 @@ main =
                     , testProperty
                         "extended-key-usage"
                         (property_extension_id :: ExtExtendedKeyUsage -> Bool)
+                    ]
+                , testGroup
+                    "malformed"
+                    [ testProperty "key-usage unknown bits" property_key_usage_unknown_bits
+                    , testProperty "extensions" property_malformed_extensions
+                    , testProperty "lazy decode error" property_lazy_decode_error
                     ]
                 , testProperty
                     "extensions"
