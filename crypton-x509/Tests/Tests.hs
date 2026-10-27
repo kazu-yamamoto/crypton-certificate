@@ -25,6 +25,7 @@ import Data.ASN1.Encoding (decodeASN1', encodeASN1')
 import Data.ASN1.Types
 import Data.ByteArray (convert)
 import Data.List (isInfixOf, nub, sort)
+import Data.Maybe (fromJust)
 import Data.Proxy (Proxy (..))
 import Data.X509
 
@@ -453,6 +454,54 @@ property_mldsa_mismatch (MLDSASeed seed1) (MLDSASeed seed2) =
                 , End Sequence
                 ]
 
+instance Arbitrary AltName where
+    arbitrary =
+        oneof
+            [ AltNameDNS <$> arbitraryHost
+            , AltNameRFC822 . ("user@" ++) <$> arbitraryHost
+            , AltNameURI . ("https://" ++) <$> arbitraryHost
+            , AltNameIP . B.pack <$> (elements [4, 8, 16, 32] >>= vector)
+            , AltNameDN <$> arbitrary
+            ]
+      where
+        arbitraryHost = listOf1 (elements "abcxyz.-")
+
+instance Arbitrary GeneralSubtree where
+    arbitrary =
+        GeneralSubtree
+            <$> arbitrary
+            <*> pure 0
+            <*> oneof [pure Nothing, Just <$> choose (0, 300)]
+
+instance Arbitrary ExtNameConstraints where
+    arbitrary = ExtNameConstraints <$> arbitrary <*> arbitrary
+
+instance Arbitrary ExtSubjectAltName where
+    arbitrary = ExtSubjectAltName <$> arbitrary
+
+-- NameConstraints with permitted dNSName "example.com" and
+-- excluded iPAddress 10.0.0.0/8, as encoded by OpenSSL.
+property_name_constraints_der :: Bool
+property_name_constraints_der =
+    extensionDecode raw
+        == Just
+            ( Right $
+                ExtNameConstraints
+                    [GeneralSubtree (AltNameDNS "example.com") 0 Nothing]
+                    [GeneralSubtree (AltNameIP (B.pack [10, 0, 0, 0, 255, 0, 0, 0])) 0 Nothing]
+            )
+        && extensionEncode
+            True
+            (either error id (fromJust (extensionDecode raw)) :: ExtNameConstraints)
+            == raw
+  where
+    raw = ExtensionRaw [2, 5, 29, 30] True der
+    der =
+        B.pack $
+            [0x30, 0x1f, 0xa0, 0x0f, 0x30, 0x0d, 0x82, 0x0b]
+                ++ map (fromIntegral . fromEnum) "example.com"
+                ++ [0xa1, 0x0c, 0x30, 0x0a, 0x87, 0x08, 10, 0, 0, 0, 255, 0, 0, 0]
+
 -- Unknown key usage bits and a bogus bit string length are ignored.
 property_key_usage_unknown_bits :: Bool
 property_key_usage_unknown_bits =
@@ -471,6 +520,40 @@ property_malformed_extensions =
                 :: Either String ExtCrlDistributionPoints
             )
   where
+    isLeft = either (const True) (const False)
+
+-- Unsupported GeneralName types in a SAN are skipped, but not in constraints.
+property_san_skips_unknown :: Bool
+property_san_skips_unknown =
+    extDecode
+        ( [Start Sequence]
+            ++ registeredID
+            ++ [Other Context 2 (B.pack [0x61])]
+            ++ otherName
+            ++ [Start (Container Context 4)]
+            ++ toASN1 dn [End (Container Context 4)]
+            ++ [End Sequence]
+        )
+        == Right (ExtSubjectAltName [AltNameDNS "a", AltNameDN dn])
+        && isLeft
+            ( extDecode
+                ( [Start Sequence, Start (Container Context 0), Start Sequence]
+                    ++ registeredID
+                    ++ [End Sequence, End (Container Context 0), End Sequence]
+                )
+                :: Either String ExtNameConstraints
+            )
+  where
+    dn = DistinguishedName [(getObjectID DnCommonName, asn1CharacterString UTF8 "x")]
+    registeredID = [Other Context 8 (B.pack [0x2a, 0x03])]
+    otherName =
+        [ Start (Container Context 0)
+        , OID [1, 2, 3]
+        , Start (Container Context 0)
+        , IntVal 1
+        , End (Container Context 0)
+        , End (Container Context 0)
+        ]
     isLeft = either (const True) (const False)
 
 -- A certificate whose validity cannot be decoded is rejected with 'Left'
@@ -527,11 +610,19 @@ main =
                     , testProperty
                         "extended-key-usage"
                         (property_extension_id :: ExtExtendedKeyUsage -> Bool)
+                    , testProperty
+                        "subject-alt-name"
+                        (property_extension_id :: ExtSubjectAltName -> Bool)
+                    , testProperty
+                        "name-constraints"
+                        (property_extension_id :: ExtNameConstraints -> Bool)
+                    , testProperty "name-constraints DER" property_name_constraints_der
                     ]
                 , testGroup
                     "malformed"
                     [ testProperty "key-usage unknown bits" property_key_usage_unknown_bits
                     , testProperty "extensions" property_malformed_extensions
+                    , testProperty "SAN skips unknown names" property_san_skips_unknown
                     , testProperty "lazy decode error" property_lazy_decode_error
                     ]
                 , testProperty

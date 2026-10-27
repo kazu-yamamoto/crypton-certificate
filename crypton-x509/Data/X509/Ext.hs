@@ -43,9 +43,11 @@ import Data.ASN1.BitArray
 import Data.ASN1.Encoding
 import Data.ASN1.Parse
 import Data.ASN1.Types
+import Data.Bits (shiftR, testBit, (.&.))
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Char8 as BC
 import Data.List (find)
+import Data.Maybe (catMaybes)
 import Data.Proxy
 import Data.X509.DistinguishedName
 import Data.X509.ExtensionRaw
@@ -293,15 +295,27 @@ instance Extension ExtCrlDistributionPoints where
 
 -- extEncode (ExtCrlDistributionPoints )
 
+-- | GeneralName types that 'AltName' cannot represent are skipped.
 parseGeneralNames :: ParseASN1 [AltName]
-parseGeneralNames = onNextContainer Sequence $ getMany getAddr
+parseGeneralNames = onNextContainer Sequence $ catMaybes <$> getMany getAddrMaybe
 
+-- | Fails on GeneralName types that 'AltName' cannot represent.
 getAddr :: ParseASN1 AltName
-getAddr = do
+getAddr =
+    getAddrMaybe
+        >>= maybe (throwParseError "GeneralNames: unsupported name type") return
+
+-- | 'Nothing' for a well-formed GeneralName of an unsupported type.
+getAddrMaybe :: ParseASN1 (Maybe AltName)
+getAddrMaybe = do
     m <- onNextContainerMaybe (Container Context 0) getComposedAddr
     case m of
-        Nothing -> getSimpleAddr
         Just r -> return r
+        Nothing -> do
+            d <- onNextContainerMaybe (Container Context 4) getObject
+            case d of
+                Just dn -> return $ Just $ AltNameDN dn
+                Nothing -> getUnsupportedOrSimpleAddr
   where
     getComposedAddr = do
         n <- getNext
@@ -313,7 +327,7 @@ getAddr = do
                     Just [ASN1String cs] ->
                         case safeCharacterToString cs of
                             Nothing -> throwParseError ("GeneralNames: invalid string for XMPP Addr")
-                            Just s -> return $ AltNameXMPP s
+                            Just s -> return $ Just $ AltNameXMPP s
                     _ ->
                         throwParseError ("GeneralNames: expecting string for XMPP Addr got: " ++ show c)
             OID [1, 3, 6, 1, 5, 5, 7, 8, 7] -> do
@@ -323,27 +337,34 @@ getAddr = do
                     Just [ASN1String cs] ->
                         case safeCharacterToString cs of
                             Nothing -> throwParseError ("GeneralNames: invalid string for DNSSrv Addr")
-                            Just s -> return $ AltNameDNSSRV s
+                            Just s -> return $ Just $ AltNameDNSSRV s
                     _ ->
                         throwParseError
                             ("GeneralNames: expecting string for DNSSRV Addr got: " ++ show c)
-            OID unknown -> throwParseError ("GeneralNames: unknown OID " ++ show unknown)
+            OID _ -> getMany getNext >> return Nothing -- unknown otherName
             _ -> throwParseError ("GeneralNames: expecting OID but got " ++ show n)
 
     getSimpleAddr = do
         n <- getNext
         case n of
-            (Other Context 1 b) -> return $ AltNameRFC822 $ BC.unpack b
-            (Other Context 2 b) -> return $ AltNameDNS $ BC.unpack b
+            (Other Context 1 b) -> return $ Just $ AltNameRFC822 $ BC.unpack b
+            (Other Context 2 b) -> return $ Just $ AltNameDNS $ BC.unpack b
+            -- directoryName as written by older versions of this library
             (Other Context 4 b) -> case safeDecode (decodeASN1' DER b) of
                 Left e1 -> throwParseError e1
                 Right as -> case runParseASN1 getObject as of
-                    Right dn -> return $ AltNameDN dn
+                    Right dn -> return $ Just $ AltNameDN dn
                     Left e2 -> throwParseError e2
-            (Other Context 6 b) -> return $ AltNameURI $ BC.unpack b
-            (Other Context 7 b) -> return $ AltNameIP b
+            (Other Context 6 b) -> return $ Just $ AltNameURI $ BC.unpack b
+            (Other Context 7 b) -> return $ Just $ AltNameIP b
+            (Other Context 8 _) -> return Nothing -- registeredID
             _ ->
                 throwParseError ("GeneralNames: not coping with unknown stream " ++ show n)
+    -- x400Address and ediPartyName are skipped
+    getUnsupportedOrSimpleAddr = do
+        x400 <- getNextContainerMaybe (Container Context 3)
+        edi <- maybe (getNextContainerMaybe (Container Context 5)) (return . Just) x400
+        maybe getSimpleAddr (const $ return Nothing) edi
 
 encodeGeneralNames :: [AltName] -> [ASN1]
 encodeGeneralNames names =
@@ -354,7 +375,8 @@ encodeGeneralNames names =
 encodeAltName :: AltName -> [ASN1]
 encodeAltName (AltNameRFC822 n) = [Other Context 1 $ BC.pack n]
 encodeAltName (AltNameDNS n) = [Other Context 2 $ BC.pack n]
-encodeAltName (AltNameDN dn) = [Other Context 4 $ encodeASN1' DER $ toASN1 dn []]
+encodeAltName (AltNameDN dn) =
+    [Start (Container Context 4)] ++ toASN1 dn [End (Container Context 4)]
 encodeAltName (AltNameURI n) = [Other Context 6 $ BC.pack n]
 encodeAltName (AltNameIP n) = [Other Context 7 $ n]
 encodeAltName (AltNameXMPP n) =
@@ -367,7 +389,7 @@ encodeAltName (AltNameXMPP n) =
     ]
 encodeAltName (AltNameDNSSRV n) =
     [ Start (Container Context 0)
-    , OID [1, 3, 6, 1, 5, 5, 7, 8, 5]
+    , OID [1, 3, 6, 1, 5, 5, 7, 8, 7]
     , Start (Container Context 0)
     , ASN1String $ asn1CharacterString UTF8 n
     , End (Container Context 0)
@@ -440,26 +462,26 @@ encodeNameConstraints (ExtNameConstraints permitted excluded) =
         ++ [End Sequence]
   where
     put _ [] = []
+    -- IMPLICIT tagging: the tag replaces the SEQUENCE OF
     put n xs =
-        [Start (Container Context n), Start Sequence]
+        [Start (Container Context n)]
             ++ concatMap encodeGeneralSubtree xs
-            ++ [End Sequence, End (Container Context n)]
+            ++ [End (Container Context n)]
 
 encodeGeneralSubtree :: GeneralSubtree -> [ASN1]
 encodeGeneralSubtree (GeneralSubtree base minimum' maximum') =
     [Start Sequence]
         ++ encodeAltName base
-        ++ ( if minimum' /= 0
-                then [Other Context 0 (encodeASN1' DER [IntVal minimum'])]
-                else []
-           )
-        ++ maybe
-            []
-            ( \m ->
-                [Other Context 1 (encodeASN1' DER [IntVal m])]
-            )
-            maximum'
+        ++ (if minimum' /= 0 then [Other Context 0 (intContent minimum')] else [])
+        ++ maybe [] (\m -> [Other Context 1 (intContent m)]) maximum'
         ++ [End Sequence]
+  where
+    -- the content octets of an IMPLICIT INTEGER (two's complement)
+    intContent = B.pack . go
+      where
+        go i
+            | i >= -128 && i < 128 = [fromIntegral i]
+            | otherwise = go (i `shiftR` 8) ++ [fromIntegral (i .&. 0xff)]
 
 --------------------------------------------------------------------------------
 -- Decoding
@@ -482,6 +504,8 @@ decodeNameConstraints
         decodeSubtrees :: [ASN1] -> Either String ([GeneralSubtree], [ASN1])
         decodeSubtrees ys = loop ys []
           where
+            loop (End (Container Context _) : _) [] =
+                Left "NameConstraints: empty GeneralSubtrees"
             loop (End (Container Context _) : rest) acc =
                 Right (reverse acc, rest)
             loop zs acc = do
@@ -496,21 +520,12 @@ decodeGeneralSubtree
 decodeGeneralSubtree (Start Sequence : xs) = do
     (base, rest1) <- runParseASN1State getAddr xs
 
-    let (minimum', rest2) =
-            case rest1 of
-                (Other Context 0 bs : rs) ->
-                    case decodeASN1' DER bs of
-                        Right [IntVal n] -> (n, rs)
-                        _ -> (0, rest1)
-                _ -> (0, rest1)
-
-    let (maximum', rest3) =
-            case rest2 of
-                (Other Context 1 bs : rs) ->
-                    case decodeASN1' DER bs of
-                        Right [IntVal n] -> (Just n, rs)
-                        _ -> (Nothing, rest2)
-                _ -> (Nothing, rest2)
+    (minimum', rest2) <- case rest1 of
+        (Other Context 0 bs : rs) -> (\n -> (n, rs)) <$> implicitInt bs
+        _ -> Right (0, rest1)
+    (maximum', rest3) <- case rest2 of
+        (Other Context 1 bs : rs) -> (\n -> (Just n, rs)) <$> implicitInt bs
+        _ -> Right (Nothing, rest2)
 
     case rest3 of
         (End Sequence : rs) ->
@@ -519,6 +534,14 @@ decodeGeneralSubtree (Start Sequence : xs) = do
             Left "GeneralSubtree: missing end sequence"
 decodeGeneralSubtree _ =
     Left "GeneralSubtree: invalid ASN1"
+
+-- | Decode the content octets of an IMPLICIT INTEGER.
+implicitInt :: B.ByteString -> Either String Integer
+implicitInt bs
+    | B.null bs = Left "GeneralSubtree: empty integer"
+    | otherwise = Right $ B.foldl' (\a w -> a * 256 + fromIntegral w) sign bs
+  where
+    sign = if testBit (B.head bs) 7 then -1 else 0
 
 recognizedOIDs :: [OID]
 recognizedOIDs =
