@@ -26,6 +26,7 @@ library
         Data.X509.Validation.Fingerprint
         Data.X509.Validation.Cache
         Data.X509.Validation.Types
+        Data.X509.Validation.Internal
 
     default-language: Haskell2010
     ghc-options:      -Wall

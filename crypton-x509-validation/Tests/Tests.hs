@@ -7,7 +7,12 @@ import Crypto.Hash.Algorithms
 
 import qualified Crypto.PubKey.DSA as DSA
 import qualified Crypto.PubKey.ECC.Types as ECC
+import qualified Crypto.PubKey.RSA as RSA
 import qualified Crypto.PubKey.RSA.PSS as PSS
+
+import Data.ASN1.BinaryEncoding (DER (..))
+import Data.ASN1.Encoding (encodeASN1')
+import Data.ASN1.Types
 
 import Data.Default
 import Data.Monoid
@@ -620,6 +625,41 @@ testExhaustive res cn hostname expected = testWithRes res caseName $ \rd -> do
     caseName = if null hostname then "empty" else hostname
     checks = defaultChecks{checkExhaustive = True}
 
+-- | Signature verification with degenerate or oversized keys fails.
+testBadKeys :: TestTree
+testBadKeys =
+    testGroup
+        "bad-keys"
+        [ testCase "DSA p=0" $
+            verifySignature
+                (SignatureALG HashSHA256 PubKeyALG_DSA)
+                (PubKeyDSA (DSA.PublicKey (DSA.Params 0 2 7) 3))
+                (BS.pack [1, 2, 3])
+                (encodeASN1' DER [Start Sequence, IntVal 1, IntVal 1, End Sequence])
+                @?= SignatureFailed SignatureInvalid
+        , testCase "huge RSA modulus" $
+            verifySignature
+                (SignatureALG HashSHA256 PubKeyALG_RSA)
+                (PubKeyRSA (RSA.PublicKey 2049 (2 ^ (16392 :: Int) - 1) 3))
+                (BS.pack [1, 2, 3])
+                (BS.replicate 2049 1)
+                @?= SignatureFailed SignatureInvalid
+        , testCase "huge RSA exponent" $
+            verifySignature
+                (SignatureALG HashSHA256 PubKeyALG_RSA)
+                (PubKeyRSA (RSA.PublicKey 256 (2 ^ (2048 :: Int) - 1) (2 ^ (2047 :: Int) + 1)))
+                (BS.pack [1, 2, 3])
+                (BS.replicate 256 1)
+                @?= SignatureFailed SignatureInvalid
+        , testCase "tiny RSA-PSS modulus" $
+            verifySignature
+                (SignatureALG HashSHA256 PubKeyALG_RSAPSS)
+                (PubKeyRSA (RSA.PublicKey 1 0x7f 3))
+                (BS.pack [1, 2, 3])
+                (BS.pack [1])
+                @?= SignatureFailed SignatureInvalid
+        ]
+
 -- | All validation test cases.
 treeWithAlg :: TestName -> Alg pub priv -> TestTree
 treeWithAlg groupName alg = withResource (initData alg) freeData $ \res ->
@@ -1000,6 +1040,7 @@ main =
             , treeWithAlg "ML-DSA-44" AlgMLDSA44
             , treeWithAlg "ML-DSA-65" AlgMLDSA65
             , treeWithAlg "ML-DSA-87" AlgMLDSA87
+            , testBadKeys
             ]
   where
     pssParams = PSS.defaultPSSParams SHA224

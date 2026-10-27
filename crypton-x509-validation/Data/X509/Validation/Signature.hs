@@ -15,12 +15,14 @@ module Data.X509.Validation.Signature (
 
 import Crypto.Error (CryptoFailable (..))
 import Crypto.Hash
+import Crypto.Number.Basic (numBits)
 import qualified Crypto.PubKey.DSA as DSA
 import qualified Crypto.PubKey.ECC.ECDSA as ECDSA
 import qualified Crypto.PubKey.ECC.Types as ECC
 import qualified Crypto.PubKey.Ed25519 as Ed25519
 import qualified Crypto.PubKey.Ed448 as Ed448
 import qualified Crypto.PubKey.MLDSA as MLDSA
+import qualified Crypto.PubKey.RSA as RSA
 import qualified Crypto.PubKey.RSA.PKCS15 as RSA
 import qualified Crypto.PubKey.RSA.PSS as PSS
 
@@ -30,6 +32,7 @@ import Data.ASN1.Types
 import Data.ByteString (ByteString)
 import Data.X509
 import Data.X509.EC
+import Data.X509.Validation.Internal (tryPure)
 
 -- | A set of possible return from signature verification.
 --
@@ -81,8 +84,33 @@ verifySignature
     -> ByteString
     -- ^ Signature to verify
     -> SignatureVerification
-verifySignature (SignatureALG_Unknown _) _ _ _ = SignatureFailed SignatureUnimplemented
-verifySignature (SignatureALG hashALG PubKeyALG_RSAPSS) pubkey cdata signature = case verifyF pubkey of
+verifySignature alg pubkey cdata signature
+    | not (acceptablePubKey pubkey) = SignatureFailed SignatureInvalid
+    | otherwise =
+        -- degenerate keys or encodings must not throw from pure code
+        either (const $ SignatureFailed SignatureInvalid) id $
+            tryPure (`seq` ()) (verifySignature' alg pubkey cdata signature)
+
+-- | Reject key parameters that are invalid or too costly to verify with.
+acceptablePubKey :: PubKey -> Bool
+acceptablePubKey (PubKeyRSA (RSA.PublicKey _ n e)) =
+    n > 1 && numBits n <= 16384 && e > 1 && numBits e <= 64
+acceptablePubKey (PubKeyDSA (DSA.PublicKey (DSA.Params p g q) y)) =
+    p > 2
+        && numBits p <= 8192
+        && q > 1
+        && q < p
+        && numBits q <= 512
+        && g > 1
+        && g < p
+        && y > 1
+        && y < p
+acceptablePubKey _ = True
+
+verifySignature'
+    :: SignatureALG -> PubKey -> ByteString -> ByteString -> SignatureVerification
+verifySignature' (SignatureALG_Unknown _) _ _ _ = SignatureFailed SignatureUnimplemented
+verifySignature' (SignatureALG hashALG PubKeyALG_RSAPSS) pubkey cdata signature = case verifyF pubkey of
     Nothing -> SignatureFailed SignatureUnimplemented
     Just f ->
         if f cdata signature
@@ -96,7 +124,7 @@ verifySignature (SignatureALG hashALG PubKeyALG_RSAPSS) pubkey cdata signature =
         | hashALG == HashSHA224 = Just $ PSS.verify (PSS.defaultPSSParams SHA224) key
         | otherwise = Nothing
     verifyF _ = Nothing
-verifySignature (SignatureALG hashALG pubkeyALG) pubkey cdata signature
+verifySignature' (SignatureALG hashALG pubkeyALG) pubkey cdata signature
     | pubkeyToAlg pubkey == pubkeyALG = case verifyF pubkey of
         Nothing -> SignatureFailed SignatureUnimplemented
         Just f ->
@@ -137,7 +165,7 @@ verifySignature (SignatureALG hashALG pubkeyALG) pubkey cdata signature
     rsaVerify HashSHA256 = RSA.verify (Just SHA256)
     rsaVerify HashSHA384 = RSA.verify (Just SHA384)
     rsaVerify HashSHA512 = RSA.verify (Just SHA512)
-verifySignature (SignatureALG_IntrinsicHash pubkeyALG) pubkey cdata signature
+verifySignature' (SignatureALG_IntrinsicHash pubkeyALG) pubkey cdata signature
     | pubkeyToAlg pubkey == pubkeyALG = doVerify pubkey
     | otherwise = SignatureFailed SignaturePubkeyMismatch
   where
