@@ -1,5 +1,10 @@
 # ChangeLog for crypton-x509
 
+## 1.10.2
+
+* Reject iPAddress GeneralNames of invalid length in SubjectAltName
+  (4 or 16 bytes) and NameConstraints (8 or 32 bytes).
+
 ## 1.10.1
 
 * Decoding functions return `Left` instead of throwing on malformed

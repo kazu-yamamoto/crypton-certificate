@@ -1,5 +1,13 @@
 # ChangeLog for crypton-x509-validation
 
+## 1.10.2
+
+* Fix host name validation with iPAddress SANs: an IP address is
+  matched only against iPAddress SANs and the CN is not used if the
+  SubjectAltName extension is present, even without dNSName.
+* An IP address is no longer matched against the CN of a certificate
+  without SubjectAltName.
+
 ## 1.10.1
 
 * Fix name constraint bypasses: constraints are accumulated per RFC
