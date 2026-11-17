@@ -480,7 +480,7 @@ getNameConstSpec cert useCN =
         ]
     cn
         | useCN = case getNames cert of
-            Right (Just name, []) -> [maybe (AltNameDNS name) ipToAltName (parseIPAddress name)]
+            Right (Just name, Nothing) -> [maybe (AltNameDNS name) ipToAltName (parseIPAddress name)]
             _ -> []
         | otherwise = []
     names = case extensionGetE exts of
@@ -501,47 +501,39 @@ validateTime currentTime cert
   where
     (before, after) = certValidity cert
 
--- | 'Left' if the SAN extension is present but cannot be decoded.
-getNames :: Certificate -> Either String (Maybe String, [String])
+-- | The commonName and the SAN entries ('Nothing' without the extension).
+-- 'Left' if the SAN extension is present but cannot be decoded.
+getNames :: Certificate -> Either String (Maybe String, Maybe [AltName])
 getNames cert = case extensionGetE $ certExtensions cert of
     Just (Left e) -> Left e
-    Just (Right san) -> Right (commonName, toAltName san)
-    Nothing -> Right (commonName, [])
+    Just (Right (ExtSubjectAltName names)) -> Right (commonName, Just names)
+    Nothing -> Right (commonName, Nothing)
   where
     commonName = getDnElement DnCommonName (certSubjectDN cert) >>= safeCharacterToString
-    toAltName (ExtSubjectAltName names) = catMaybes $ map unAltName names
-      where
-        unAltName (AltNameDNS s) = Just s
-        unAltName _ = Nothing
 
 data IPAddress
     = IPv4Address IPv4
     | IPv6Address IPv6
     deriving (Eq)
 
-getIPs :: Certificate -> [IPAddress]
-getIPs cert = fromMaybe [] (toAltName <$> (extensionGet $ certExtensions cert))
+toIPAddress :: ByteString -> Maybe IPAddress
+toIPAddress s = case unpack s of
+    [a, b, c, d] -> Just $ IPv4Address $ toIPv4 $ fmap fromIntegral [a, b, c, d]
+    [a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p] ->
+        Just $
+            IPv6Address $
+                toIPv6
+                    [ fuse a b
+                    , fuse c d
+                    , fuse e f
+                    , fuse g h
+                    , fuse i j
+                    , fuse k l
+                    , fuse m n
+                    , fuse o p
+                    ]
+    _ -> Nothing
   where
-    toAltName (ExtSubjectAltName names) = catMaybes $ map unAltName names
-
-    unAltName (AltNameIP s) = case unpack s of
-        [a, b, c, d] -> Just $ IPv4Address $ toIPv4 $ fmap fromIntegral [a, b, c, d]
-        [a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p] ->
-            Just $
-                IPv6Address $
-                    toIPv6
-                        [ fuse a b
-                        , fuse c d
-                        , fuse e f
-                        , fuse g h
-                        , fuse i j
-                        , fuse k l
-                        , fuse m n
-                        , fuse o p
-                        ]
-        _ -> Nothing
-    unAltName _ = Nothing
-
     fuse :: Word8 -> Word8 -> Int
     fuse a b = shiftL (fromIntegral a) 8 .|. (fromIntegral b)
 
@@ -551,10 +543,10 @@ parseIPAddress (readMaybe -> Just ipV6) = Just $ IPv6Address ipV6
 parseIPAddress _ = Nothing
 
 -- | Validate that the fqhn is matched by at least one name in the certificate.
--- If the subjectAltname extension is present, then the certificate commonName
--- is ignored, and only the DNS names and IP Addresses, if any, in the
--- subjectAltName are considered.  Otherwise, the commonName from the subjectDN
--- is used.
+-- An IP address is matched only against the iPAddress entries of the
+-- subjectAltName.  A host name is matched against the dNSName entries if
+-- the subjectAltName extension is present, even if it has no dNSName.
+-- Otherwise, the commonName from the subjectDN is used.
 --
 -- If the subjectAltName extension cannot be decoded, the name never matches.
 --
@@ -564,23 +556,22 @@ parseIPAddress _ = Nothing
 validateCertificateName :: HostName -> Certificate -> [FailedReason]
 validateCertificateName fqhn cert = case getNames cert of
     Left _ -> [NameMismatch fqhn]
-    Right names -> validateNames fqhn cert names
+    Right names -> validateNames fqhn names
 
 validateNames
-    :: HostName -> Certificate -> (Maybe String, [String]) -> [FailedReason]
-validateNames fqhn cert (commonName, altNames)
-    | not $ null altNames =
-        case parseIPAddress fqhn of
-            Nothing -> findMatch [] $ map matchDomain altNames
-            Just ip ->
-                if elem ip (getIPs cert)
-                    then []
-                    else [NameMismatch fqhn]
-    | otherwise =
-        case commonName of
+    :: HostName -> (Maybe String, Maybe [AltName]) -> [FailedReason]
+validateNames fqhn (commonName, mAltNames) = case parseIPAddress fqhn of
+    Just ip
+        | ip `elem` [a | AltNameIP b <- altNames, Just a <- [toIPAddress b]] -> []
+        | otherwise -> [NameMismatch fqhn]
+    Nothing -> case mAltNames of
+        Just _ -> findMatch [] $ [matchDomain n | AltNameDNS n <- altNames]
+        Nothing -> case commonName of
             Nothing -> [NoCommonName]
             Just cn -> findMatch [] $ [matchDomain cn]
   where
+    altNames = fromMaybe [] mAltNames
+
     findMatch :: [FailedReason] -> [[FailedReason]] -> [FailedReason]
     findMatch _ [] = [NameMismatch fqhn]
     findMatch _ ([] : _) = []

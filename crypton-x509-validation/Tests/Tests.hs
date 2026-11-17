@@ -561,6 +561,37 @@ testSubjectAltNameIP res ip hostname check expected = testWithRes res caseName $
                 , AltNameDNS "dummy2"
                 ]
 
+-- | Tests a host name against a certificate with the given CN and,
+-- if any, SubjectAltName entries.
+testNames
+    :: IO (RData pub priv)
+    -> TestName
+    -> String
+    -- ^ Certificate CN
+    -> Maybe [AltName]
+    -- ^ Certificate SubjectAltName
+    -> HostName
+    -> [FailedReason]
+    -> TestTree
+testNames res caseName cn san hostname expected = testWithRes res caseName $ \rd -> do
+    pair <-
+        mkCertificate
+            2
+            100
+            (mkDn cn)
+            (present rd)
+            (exts ++ leafStdExts)
+            (CA $ intermediate rd)
+            (keys1 rd)
+    assertValidationResult
+        rd
+        defaultChecks
+        hostname
+        [pair, intermediate rd]
+        expected
+  where
+    exts = maybe [] (\ns -> [mkExtension False $ ExtSubjectAltName ns]) san
+
 -- | Tests 'checkLeafKeyUsage'.
 testLeafKeyUsage
     :: IO (RData pub priv)
@@ -1425,6 +1456,51 @@ treeWithAlg groupName alg = withResource (initData alg) freeData $ \res ->
                     "::1"
                     True
                     []
+                ]
+            , testGroup
+                "IP address and CN"
+                [ testNames
+                    res
+                    "IP SAN mismatch, CN match"
+                    "10.0.0.1"
+                    (Just [AltNameIP (BS.pack [10, 0, 0, 2])])
+                    "10.0.0.1"
+                    [NameMismatch "10.0.0.1"]
+                , testNames
+                    res
+                    "IP SAN match, CN mismatch"
+                    "other"
+                    (Just [AltNameIP (BS.pack [10, 0, 0, 1])])
+                    "10.0.0.1"
+                    []
+                , testNames
+                    res
+                    "IP SAN only, CN host name"
+                    "www.example.com"
+                    (Just [AltNameIP (BS.pack [10, 0, 0, 1])])
+                    "www.example.com"
+                    [NameMismatch "www.example.com"]
+                , testNames
+                    res
+                    "no SAN, CN IP"
+                    "10.0.0.1"
+                    Nothing
+                    "10.0.0.1"
+                    [NameMismatch "10.0.0.1"]
+                , testNames
+                    res
+                    "no SAN, CN host name"
+                    "www.example.com"
+                    Nothing
+                    "www.example.com"
+                    []
+                , testNames
+                    res
+                    "IP in dNSName"
+                    "other"
+                    (Just [AltNameDNS "10.0.0.1"])
+                    "10.0.0.1"
+                    [NameMismatch "10.0.0.1"]
                 ]
             , testGroup
                 "disabled"
