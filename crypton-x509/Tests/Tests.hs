@@ -344,7 +344,8 @@ mldsaForms seed =
 -- different values, because they are three different files.
 property_mldsa_forms :: MLDSASeed -> Bool
 property_mldsa_forms (MLDSASeed seed) =
-    map (fmap fst . mldsaPKCS8 . snd) (mldsaForms seed) == map (Right . expected) forms
+    map (fmap fst . mldsaPKCS8 . snd) (mldsaForms seed)
+        == map (Right . expected) forms
         && length (nub (map expected forms)) == 3
   where
     forms = map fst (mldsaForms seed)
@@ -460,7 +461,7 @@ instance Arbitrary AltName where
             [ AltNameDNS <$> arbitraryHost
             , AltNameRFC822 . ("user@" ++) <$> arbitraryHost
             , AltNameURI . ("https://" ++) <$> arbitraryHost
-            , AltNameIP . B.pack <$> (elements [4, 8, 16, 32] >>= vector)
+            , AltNameIP . B.pack <$> (elements [4, 16] >>= vector)
             , AltNameDN <$> arbitrary
             ]
       where
@@ -469,9 +470,13 @@ instance Arbitrary AltName where
 instance Arbitrary GeneralSubtree where
     arbitrary =
         GeneralSubtree
-            <$> arbitrary
+            <$> (arbitrary >>= base)
             <*> pure 0
             <*> oneof [pure Nothing, Just <$> choose (0, 300)]
+      where
+        -- an address with a mask
+        base (AltNameIP _) = AltNameIP . B.pack <$> (elements [8, 32] >>= vector)
+        base a = return a
 
 instance Arbitrary ExtNameConstraints where
     arbitrary = ExtNameConstraints <$> arbitrary <*> arbitrary

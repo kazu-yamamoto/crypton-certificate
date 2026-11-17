@@ -297,7 +297,14 @@ instance Extension ExtCrlDistributionPoints where
 
 -- | GeneralName types that 'AltName' cannot represent are skipped.
 parseGeneralNames :: ParseASN1 [AltName]
-parseGeneralNames = onNextContainer Sequence $ catMaybes <$> getMany getAddrMaybe
+parseGeneralNames = onNextContainer Sequence $ do
+    names <- catMaybes <$> getMany getAddrMaybe
+    forM_ names $ \name -> case name of
+        AltNameIP ip
+            | B.length ip /= 4 && B.length ip /= 16 ->
+                throwParseError "GeneralNames: invalid iPAddress length"
+        _ -> return ()
+    return names
 
 -- | Fails on GeneralName types that 'AltName' cannot represent.
 getAddr :: ParseASN1 AltName
@@ -519,6 +526,12 @@ decodeGeneralSubtree
     -> Either String (GeneralSubtree, [ASN1])
 decodeGeneralSubtree (Start Sequence : xs) = do
     (base, rest1) <- runParseASN1State getAddr xs
+    -- an iPAddress constraint is an address followed by a mask
+    case base of
+        AltNameIP ip
+            | B.length ip /= 8 && B.length ip /= 32 ->
+                Left "GeneralSubtree: invalid iPAddress length"
+        _ -> Right ()
 
     (minimum', rest2) <- case rest1 of
         (Other Context 0 bs : rs) -> (\n -> (n, rs)) <$> implicitInt bs

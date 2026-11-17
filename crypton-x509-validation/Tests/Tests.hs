@@ -1501,6 +1501,13 @@ treeWithAlg groupName alg = withResource (initData alg) freeData $ \res ->
                     (Just [AltNameDNS "10.0.0.1"])
                     "10.0.0.1"
                     [NameMismatch "10.0.0.1"]
+                , testNames
+                    res
+                    "invalid iPAddress length"
+                    "other"
+                    (Just [AltNameIP (BS.pack [10, 0, 0, 1, 0]), AltNameDNS "www.example.com"])
+                    "www.example.com"
+                    [NameMismatch "www.example.com"]
                 ]
             , testGroup
                 "disabled"
