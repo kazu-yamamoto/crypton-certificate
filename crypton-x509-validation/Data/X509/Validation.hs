@@ -20,8 +20,23 @@ module Data.X509.Validation (
     SignatureFailure (..),
 
     -- * Validation configuration types
-    ValidationChecks (..),
-    ValidationHooks (..),
+
+    -- the constructors are hidden so that fields can be added
+    ValidationChecks,
+    checkTimeValidity,
+    checkAtTime,
+    checkStrictOrdering,
+    checkCAConstraints,
+    checkExhaustive,
+    checkLeafV3,
+    checkLeafKeyUsage,
+    checkLeafKeyPurpose,
+    checkFQHN,
+    ValidationHooks,
+    hookMatchSubjectIssuer,
+    hookValidateTime,
+    hookValidateName,
+    hookFilterReason,
     defaultChecks,
     defaultHooks,
 
@@ -108,8 +123,8 @@ data FailedReason
 
 -- | A set of checks to activate or parametrize to perform on certificates.
 --
--- It's recommended to use 'defaultChecks' to create the structure,
--- to better cope with future changes or expansion of the structure.
+-- Values are made by updating 'defaultChecks', e.g.
+-- @defaultChecks{checkFQHN = False}@.
 data ValidationChecks = ValidationChecks
     { checkTimeValidity :: Bool
     -- ^ check time validity of every certificate in the chain.
@@ -153,6 +168,8 @@ data ValidationChecks = ValidationChecks
     deriving (Show, Eq)
 
 -- | A set of hooks to manipulate the way the verification works.
+--
+-- Values are made by updating 'defaultHooks'.
 --
 -- BEWARE, it's easy to change behavior leading to compromised security.
 data ValidationHooks = ValidationHooks
