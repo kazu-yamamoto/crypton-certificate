@@ -1,5 +1,10 @@
 # ChangeLog for crypton-x509
 
+## 1.10.3
+
+* Omit AlgorithmIdentifier parameters for ECDSA and DSA signatures
+  [#32](https://github.com/kazu-yamamoto/crypton-certificate/pull/32)
+
 ## 1.10.2
 
 * Reject iPAddress GeneralNames of invalid length in SubjectAltName
