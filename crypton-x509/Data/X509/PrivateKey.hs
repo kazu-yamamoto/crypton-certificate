@@ -38,7 +38,8 @@ import Data.X509.PublicKey (SerializedPoint (..))
 
 import Crypto.Debug (DebugShow (..), debugShowBytes)
 import Crypto.Error (CryptoFailable (..))
-import Crypto.Number.Serialize (i2osp, os2ip)
+import Crypto.Number.Basic (numBytes)
+import Crypto.Number.Serialize (i2osp, i2ospOf_, os2ip)
 import qualified Crypto.PubKey.Curve25519 as X25519
 import qualified Crypto.PubKey.Curve448 as X448
 import qualified Crypto.PubKey.DSA as DSA
@@ -545,17 +546,19 @@ dsaToASN1 (DSA.PrivateKey params@(DSA.Params p g q) y) =
     x = DSA.calculatePublic params y
 
 ecdsaToASN1 :: PrivKeyEC -> ASN1S
+-- RFC 5915: the private key is as long as the curve order.
 ecdsaToASN1 (PrivKeyEC_Named curveName d) =
     (++)
         [ Start Sequence
         , IntVal 1
-        , OctetString (i2osp d)
+        , OctetString (i2ospOf_ (numBytes order) d)
         , Start (Container Context 0)
         , OID oid
         , End (Container Context 0)
         , End Sequence
         ]
   where
+    order = ECC.ecc_n $ ECC.common_curve $ ECC.getCurveByName curveName
     err = error . ("ECDSA.PrivateKey.toASN1: " ++)
     oid =
         fromMaybe
@@ -565,7 +568,7 @@ ecdsaToASN1 (PrivKeyEC_Prime d a b p g o c s) =
     (++)
         [ Start Sequence
         , IntVal 1
-        , OctetString (i2osp d)
+        , OctetString (i2ospOf_ (numBytes o) d)
         , Start (Container Context 0)
         , Start Sequence
         , IntVal 1
