@@ -51,7 +51,7 @@ import Data.Maybe (catMaybes)
 import Data.Proxy
 import Data.X509.DistinguishedName
 import Data.X509.ExtensionRaw
-import Data.X509.Internal (safeCharacterToString, safeDecode)
+import Data.X509.Internal (asn1Container, safeCharacterToString, safeDecode)
 
 -- | key usage flag that is found in the key usage extension field.
 data ExtKeyUsageFlag
@@ -303,10 +303,46 @@ data DistributionPoint
 instance Extension ExtCrlDistributionPoints where
     extOID _ = [2, 5, 29, 31]
     extHasNestedASN1 = const True
-    extEncode = error "extEncode ExtCrlDistributionPoints unimplemented"
-    extDecode _ = Left "extDecode ExtCrlDistributionPoints unimplemented"
-
--- extEncode (ExtCrlDistributionPoints )
+    extEncode (ExtCrlDistributionPoints dps) =
+        asn1Container Sequence $ concatMap encodeDP dps
+      where
+        encodeDP dp = asn1Container Sequence $ asn1Container (Container Context 0) $ case dp of
+            DistributionPointFullName names ->
+                asn1Container (Container Context 0) $ concatMap encodeAltName names
+            DistributionNameRelative (DistinguishedName els) ->
+                asn1Container (Container Context 1) $
+                    concat [asn1Container Sequence [OID o, ASN1String v] | (o, v) <- els]
+    extDecode = runParseASN1 (ExtCrlDistributionPoints <$> parseDPs)
+      where
+        parseDPs = onNextContainer Sequence $ do
+            dps <- getMany parseDP
+            when (null dps) $ throwParseError "CRLDistributionPoints: empty"
+            return $ catMaybes dps
+        -- only the distribution point name is kept: reasons and cRLIssuer
+        -- are dropped, and so are points without a name
+        parseDP = onNextContainer Sequence $ do
+            name <- onNextContainerMaybe (Container Context 0) parseName
+            _ <- getNextMaybe reasons
+            _ <- onNextContainerMaybe (Container Context 2) (getMany getAddrMaybe)
+            return name
+        parseName = do
+            full <-
+                onNextContainerMaybe (Container Context 0) (catMaybes <$> getMany getAddrMaybe)
+            case full of
+                Just names -> return $ DistributionPointFullName names
+                Nothing ->
+                    maybe (throwParseError "DistributionPoint: unknown name") return
+                        =<< onNextContainerMaybe
+                            (Container Context 1)
+                            (DistributionNameRelative . DistinguishedName <$> getMany parseATV)
+        parseATV = onNextContainer Sequence $ do
+            o <- getNext
+            v <- getNext
+            case (o, v) of
+                (OID oid, ASN1String str) -> return (oid, str)
+                _ -> throwParseError "DistributionPoint: invalid attribute"
+        reasons (Other Context 1 _) = Just ()
+        reasons _ = Nothing
 
 -- | GeneralName types that 'AltName' cannot represent are skipped.
 parseGeneralNames :: ParseASN1 [AltName]
