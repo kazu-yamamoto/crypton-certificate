@@ -1040,6 +1040,53 @@ testCanonicalIssuer = testCase "canonical issuer name" $ do
     actual <- validateExample (mkStore [rootPair]) [leaf]
     actual @?= []
 
+-- | SHA-1 signatures are accepted by default and rejected on request.
+testRejectSHA1 :: TestTree
+testRejectSHA1 = testCase "SHA-1 signature" $ do
+    validity <- currentValidity
+    keys <- generateKeys (AlgRSA 1024 hashSHA1)
+    rootPair <- mkCA 1 "SHA1 Root" validity (Just bc) Nothing Self keys
+    leaf <- mkCertificate 2 2 (mkDn "leaf") validity [exampleSAN] (CA rootPair) keys
+    let run checks =
+            validate
+                HashSHA256
+                defaultHooks
+                checks
+                (mkStore [rootPair])
+                defaultValidationCache
+                ("www.example.com", fromString ":443")
+                (CertificateChain [pairSignedCert leaf])
+    accepted <- run defaultChecks
+    accepted @?= []
+    rejected <- run defaultChecks{checkRejectSHA1 = True}
+    rejected @?= [InvalidSignature SignatureUnimplemented]
+  where
+    bc = ExtBasicConstraints True Nothing
+
+-- | A hook can return its own reason.
+testOtherReason :: IO (RData pub priv) -> TestTree
+testOtherReason res = testWithRes res "other reason" $ \rd -> do
+    leaf <-
+        mkCertificate
+            2
+            53
+            (mkDn "leaf")
+            (present rd)
+            [exampleSAN]
+            (CA (root rd))
+            (keys1 rd)
+    let hooks = defaultHooks{hookValidateName = \_ _ -> [OtherReason "revoked"]}
+    actual <-
+        validate
+            HashSHA256
+            hooks
+            defaultChecks
+            (rootStore rd)
+            defaultValidationCache
+            ("www.example.com", fromString ":443")
+            (CertificateChain [pairSignedCert leaf])
+    actual @?= [OtherReason "revoked"]
+
 -- | Regression tests that do not depend on the signature algorithm.
 treeRegression :: TestTree
 treeRegression = withResource (initData AlgEd25519) freeData $ \res ->
@@ -1050,6 +1097,8 @@ treeRegression = withResource (initData AlgEd25519) freeData $ \res ->
             [ testNonCAAnchor res
             , testSignatureAlgMismatch
             , testWeakHash
+            , testRejectSHA1
+            , testOtherReason res
             ]
         , testGroup
             "path building"
