@@ -6,6 +6,8 @@
   [#38](https://github.com/kazu-yamamoto/crypton-certificate/pull/38)
 * Build certification paths with backtracking and implement CRL distribution points
   [#48](https://github.com/kazu-yamamoto/crypton-certificate/pull/48)
+* Read store files strictly with cloexec
+  [#49](https://github.com/kazu-yamamoto/crypton-certificate/pull/49)
 
 ## 1.10.0
 
