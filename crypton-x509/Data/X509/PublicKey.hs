@@ -28,7 +28,7 @@ import Data.X509.OID
 
 import Crypto.Error (CryptoFailable (..))
 import Crypto.Number.Basic (numBytes)
-import Crypto.Number.Serialize (os2ip)
+import Crypto.Number.Serialize (i2osp, i2ospOf_, os2ip)
 import qualified Crypto.PubKey.Curve25519 as X25519
 import qualified Crypto.PubKey.Curve448 as X448
 import qualified Crypto.PubKey.DSA as DSA
@@ -203,8 +203,17 @@ instance ASN1Object PubKey where
             case xs of
                 End Sequence : BitString bits : End Sequence : xs2 -> decodeCF "ML-DSA-87" PubKeyMLDSA87 bits xs2 MLDSA.verificationKey
                 _ -> Left ("fromASN1: X509.PubKey: unknown ML-DSA-87 format: " ++ show xs)
-        | otherwise = Left $ "fromASN1: unknown public key OID: " ++ show pkalg
+        -- parameters of unknown algorithms are not kept
+        | otherwise = case dropParams (0 :: Int) xs of
+            BitString bits : End Sequence : xs2 ->
+                Right (PubKeyUnknown pkalg (bitArrayGetData bits), xs2)
+            _ -> Left ("fromASN1: X509.PubKey: unknown format for " ++ show pkalg)
       where
+        dropParams 0 (End Sequence : r) = r
+        dropParams n (Start _ : r) = dropParams (n + 1) r
+        dropParams n (End _ : r) = dropParams (n - 1) r
+        dropParams n (_ : r) = dropParams n r
+        dropParams _ [] = []
         decodeASN1Err format bits xs2 f =
             case safeDecode (decodeASN1' BER (bitArrayGetData bits)) of
                 Left err ->
@@ -276,8 +285,28 @@ encodePK key = asn1Container Sequence (encodeInner key)
         eOid = case lookupOID curvesOIDTable curveName of
             Just oid -> oid
             _ -> error ("undefined curve OID: " ++ show curveName)
-    encodeInner (PubKeyEC (PubKeyEC_Prime{})) =
-        error "encodeInner: unimplemented public key EC_Prime"
+    encodeInner (PubKeyEC k@PubKeyEC_Prime{}) =
+        asn1Container Sequence ([pkalg] ++ params) ++ [BitString $ toBitArray pub 0]
+      where
+        SerializedPoint pub = pubkeyEC_pub k
+        SerializedPoint gen = pubkeyEC_generator k
+        size = numBytes (pubkeyEC_prime k)
+        params =
+            asn1Container Sequence $
+                [IntVal 1]
+                    ++ asn1Container
+                        Sequence
+                        [OID [1, 2, 840, 10045, 1, 1], IntVal (pubkeyEC_prime k)]
+                    ++ asn1Container
+                        Sequence
+                        [ OctetString (i2ospOf_ size (pubkeyEC_a k))
+                        , OctetString (i2ospOf_ size (pubkeyEC_b k))
+                        , BitString $ toBitArray (i2osp (pubkeyEC_seed k)) 0
+                        ]
+                    ++ [ OctetString gen
+                       , IntVal (pubkeyEC_order k)
+                       , IntVal (pubkeyEC_cofactor k)
+                       ]
     encodeInner (PubKeyX25519 pubkey) =
         asn1Container Sequence [pkalg] ++ [BitString $ toBitArray (convert pubkey) 0]
     encodeInner (PubKeyX448 pubkey) =

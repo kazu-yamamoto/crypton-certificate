@@ -128,6 +128,7 @@ verifySignature' (SignatureALG hashALG PubKeyALG_RSAPSS) pubkey cdata signature 
         | hashALG == HashSHA384 = Just $ PSS.verify (PSS.defaultPSSParams SHA384) key
         | hashALG == HashSHA512 = Just $ PSS.verify (PSS.defaultPSSParams SHA512) key
         | hashALG == HashSHA224 = Just $ PSS.verify (PSS.defaultPSSParams SHA224) key
+        | hashALG == HashSHA1 = Just $ PSS.verify (PSS.defaultPSSParams SHA1) key
         | otherwise = Nothing
     verifyF _ = Nothing
 verifySignature' (SignatureALG hashALG pubkeyALG) pubkey cdata signature

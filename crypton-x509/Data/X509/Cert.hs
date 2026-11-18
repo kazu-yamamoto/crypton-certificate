@@ -62,7 +62,9 @@ parseCertHeaderVersion :: ParseASN1 Int
 parseCertHeaderVersion =
     maybe 0 id <$> onNextContainerMaybe (Container Context 0) (getNext >>= getVer)
   where
-    getVer (IntVal v) = return $ fromIntegral v
+    getVer (IntVal v)
+        | v >= 0 && v <= 2 = return $ fromIntegral v
+        | otherwise = throwParseError ("unsupported version " ++ show v)
     getVer _ = throwParseError "unexpected type for version"
 
 parseCertHeaderSerial :: ParseASN1 Integer
@@ -75,7 +77,8 @@ parseCertHeaderSerial = do
 parseCertHeaderValidity :: ParseASN1 (DateTime, DateTime)
 parseCertHeaderValidity = getNextContainer Sequence >>= toTimeBound
   where
-    toTimeBound [ASN1Time _ t1 _, ASN1Time _ t2 _] = return (t1, t2)
+    toTimeBound [ASN1Time _ t1 z1, ASN1Time _ t2 z2] =
+        return (asn1TimeToUTC t1 z1, asn1TimeToUTC t2 z2)
     toTimeBound _ = throwParseError "bad validity format"
 
 -- | parse header structure of a x509 certificate. the structure is the following:
@@ -99,6 +102,14 @@ parseExtensions = fmap adapt $ onNextContainerMaybe (Container Context 3) $ getO
     adapt (Just e) = e
     adapt Nothing = Extensions Nothing
 
+-- | issuerUniqueID and subjectUniqueID are skipped.
+parseUniqueIDs :: ParseASN1 ()
+parseUniqueIDs = uid 1 >> uid 2 >> return ()
+  where
+    uid n = getNextMaybe (\a -> if isUID n a then Just () else Nothing)
+    isUID n (Other Context m _) = n == m
+    isUID _ _ = False
+
 parseCertificate :: ParseASN1 Certificate
 parseCertificate =
     Certificate
@@ -108,7 +119,7 @@ parseCertificate =
         <*> getObject
         <*> parseCertHeaderValidity
         <*> getObject
-        <*> getObject
+        <*> (getObject <* parseUniqueIDs)
         <*> parseExtensions
 
 encodeCertificateHeader :: Certificate -> [ASN1]
@@ -131,15 +142,9 @@ encodeCertificateHeader cert =
     eValidity =
         asn1Container
             Sequence
-            [ ASN1Time (timeType t1) t1 (Just (TimezoneOffset 0))
-            , ASN1Time (timeType t2) t2 (Just (TimezoneOffset 0))
-            ]
+            [encodeASN1Time t1, encodeASN1Time t2]
     eSubject = toASN1 (certSubjectDN cert) []
     epkinfo = toASN1 (certPubKey cert) []
     eexts = case certExtensions cert of
         Extensions Nothing -> []
         exts -> asn1Container (Container Context 3) $ toASN1 exts []
-    timeType t =
-        if t >= timeConvert (Date 2050 January 1)
-            then TimeGeneralized
-            else TimeUTC

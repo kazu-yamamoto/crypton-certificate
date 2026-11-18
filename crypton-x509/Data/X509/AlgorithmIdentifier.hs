@@ -207,9 +207,26 @@ instance ASN1Object SignatureALG where
                 : xs
             ) =
             pss hash1 xs
+    -- RSASSA-PSS with all parameters defaulted: SHA-1, MGF1 with SHA-1, salt 20
+    fromASN1
+        ( Start Sequence
+                : OID [1, 2, 840, 113549, 1, 1, 10]
+                : Start Sequence
+                : End Sequence
+                : End Sequence
+                : xs
+            ) =
+            Right (SignatureALG HashSHA1 PubKeyALG_RSAPSS, xs)
     fromASN1 _ =
         Left "fromASN1: X509.SignatureALG: unknown format"
     toASN1 (SignatureALG_Unknown oid) = \xs -> Start Sequence : OID oid : Null : End Sequence : xs
+    toASN1 (SignatureALG HashSHA1 PubKeyALG_RSAPSS) = \xs ->
+        Start Sequence
+            : OID [1, 2, 840, 113549, 1, 1, 10]
+            : Start Sequence
+            : End Sequence
+            : End Sequence
+            : xs
     toASN1 (SignatureALG hashAlg PubKeyALG_RSAPSS) = \xs ->
         Start Sequence
             : OID [1, 2, 840, 113549, 1, 1, 10]
