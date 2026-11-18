@@ -710,6 +710,150 @@ property_privkey_malformed =
             )
             :: Either String (PrivKey, [ASN1])
 
+sampleCert :: Certificate
+sampleCert =
+    Certificate
+        2
+        1
+        (SignatureALG HashSHA256 PubKeyALG_RSA)
+        dn
+        (t, t)
+        dn
+        (PubKeyRSA (RSA.PublicKey 1 0x7f 3))
+        (Extensions Nothing)
+  where
+    t = timeConvert (Date 2020 January 1) :: DateTime
+    dn = DistinguishedName [(getObjectID DnCommonName, asn1CharacterString UTF8 "x")]
+
+decodeCert :: [ASN1] -> Either String (Certificate, [ASN1])
+decodeCert = fromASN1
+
+property_key_usage_der :: Bool
+property_key_usage_der =
+    extEncodeBs (ExtKeyUsage [KeyUsage_digitalSignature]) == B.pack [3, 2, 7, 0x80]
+        && extEncodeBs (ExtKeyUsage [KeyUsage_keyCertSign, KeyUsage_cRLSign])
+            == B.pack [3, 2, 1, 0x06]
+        && extEncodeBs (ExtKeyUsage [KeyUsage_digitalSignature, KeyUsage_decipherOnly])
+            == B.pack [3, 3, 7, 0x80, 0x80]
+        && extEncodeBs (ExtKeyUsage []) == B.pack [3, 1, 0]
+
+property_basic_constraints_no_ca :: Bool
+property_basic_constraints_no_ca =
+    extDecode [Start Sequence, IntVal 0, End Sequence]
+        == Right (ExtBasicConstraints False (Just 0))
+
+property_aki_issuer_serial :: Bool
+property_aki_issuer_serial =
+    extDecode
+        ( [Start Sequence, Other Context 0 kid, Start (Container Context 1)]
+            ++ [Start (Container Context 4)]
+            ++ toASN1
+                (DistinguishedName [(getObjectID DnCommonName, asn1CharacterString UTF8 "x")])
+                []
+            ++ [End (Container Context 4), End (Container Context 1)]
+            ++ [Other Context 2 (B.pack [1]), End Sequence]
+        )
+        == Right (ExtAuthorityKeyId kid)
+  where
+    kid = B.pack [1, 2, 3]
+
+-- RSASSA-PSS keys (with parameters) and other unknown keys are kept as
+-- PubKeyUnknown.
+property_unknown_pubkey :: Bool
+property_unknown_pubkey =
+    decode [] == Right (PubKeyUnknown pss key, [])
+        && decode [Start Sequence, End Sequence] == Right (PubKeyUnknown pss key, [])
+  where
+    pss = [1, 2, 840, 113549, 1, 1, 10]
+    key = B.pack [1, 2, 3]
+    decode params =
+        fromASN1
+            ( [Start Sequence, Start Sequence, OID pss]
+                ++ params
+                ++ [End Sequence, BitString (toBitArray key 0), End Sequence]
+            )
+            :: Either String (PubKey, [ASN1])
+
+property_ec_prime_roundtrip :: Bool
+property_ec_prime_roundtrip = fromASN1 (toASN1 key []) == Right (key, [])
+  where
+    key =
+        PubKeyEC
+            PubKeyEC_Prime
+                { pubkeyEC_pub = SerializedPoint (B.pack [4, 1, 2])
+                , pubkeyEC_a = 3
+                , pubkeyEC_b = 0x1234
+                , pubkeyEC_prime = 0xfffffffffffffffffffffffffffffffeffffffffffffffff
+                , pubkeyEC_generator = SerializedPoint (B.pack [4, 5, 6])
+                , pubkeyEC_order = 0xffffffffffffffffffffffff99def836146bc9b1b4d22831
+                , pubkeyEC_cofactor = 1
+                , pubkeyEC_seed = 0x3045ae6fc8422f64ed579528d38120eae12196d5
+                }
+
+property_unique_ids :: Bool
+property_unique_ids =
+    decodeCert (toASN1 sampleCert [] ++ [Other Context 1 b, Other Context 2 b])
+        == Right (sampleCert, [])
+        && isLeft' (decodeCert (toASN1 sampleCert{certVersion = 3} []))
+  where
+    b = B.pack [0, 1]
+
+-- Times with a zone offset are converted to UTC, and UTCTime is used
+-- from 1950 through 2049.
+property_validity_time :: Bool
+property_validity_time =
+    fmap (certValidity . fst) (decodeCert (map withOffset (toASN1 sampleCert [])))
+        == Right (t', t')
+        && map timeType (validity 1949) == [TimeGeneralized]
+        && map timeType (validity 1950) == [TimeUTC]
+        && map timeType (validity 2049) == [TimeUTC]
+        && map timeType (validity 2050) == [TimeGeneralized]
+  where
+    (t, _) = certValidity sampleCert
+    t' = timeAdd t (Hours (-9))
+    withOffset (ASN1Time ty d _) = ASN1Time ty d (Just (TimezoneOffset 540))
+    withOffset a = a
+    validity y =
+        take
+            1
+            [ a
+            | a@ASN1Time{} <-
+                toASN1 sampleCert{certValidity = (year y, year y)} []
+            ]
+    year y = timeConvert (Date y January 1) :: DateTime
+    timeType (ASN1Time ty _ _) = ty
+    timeType _ = TimeUTC
+
+property_crl_v1 :: Bool
+property_crl_v1 =
+    take 1 encoded /= [IntVal 0]
+        && fromASN1 encoded == Right (crl, [])
+  where
+    t = timeConvert (Date 2020 January 1) :: DateTime
+    crl =
+        CRL
+            0
+            (SignatureALG HashSHA256 PubKeyALG_RSA)
+            (DistinguishedName [(getObjectID DnCommonName, asn1CharacterString UTF8 "x")])
+            t
+            Nothing
+            []
+            (Extensions Nothing)
+    encoded = toASN1 crl []
+
+property_pss_default :: Bool
+property_pss_default =
+    fromASN1 asn1 == Right (SignatureALG HashSHA1 PubKeyALG_RSAPSS, [])
+        && toASN1 (SignatureALG HashSHA1 PubKeyALG_RSAPSS) [] == asn1
+  where
+    asn1 =
+        [ Start Sequence
+        , OID [1, 2, 840, 113549, 1, 1, 10]
+        , Start Sequence
+        , End Sequence
+        , End Sequence
+        ]
+
 property_extension_id :: (Show e, Eq e, Extension e) => e -> Bool
 property_extension_id e = case extDecode (extEncode e) of
     Left err -> error err
@@ -765,6 +909,18 @@ main =
                     , testProperty "RSA key trailing data" property_rsa_pubkey_trailing
                     , testProperty "PSS hash" property_pss_hash
                     , testProperty "private key" property_privkey_malformed
+                    ]
+                , testGroup
+                    "interoperability"
+                    [ testProperty "KeyUsage DER" property_key_usage_der
+                    , testProperty "BasicConstraints without cA" property_basic_constraints_no_ca
+                    , testProperty "AKI with issuer and serial" property_aki_issuer_serial
+                    , testProperty "unknown public key" property_unknown_pubkey
+                    , testProperty "EC explicit parameters" property_ec_prime_roundtrip
+                    , testProperty "unique IDs" property_unique_ids
+                    , testProperty "validity time" property_validity_time
+                    , testProperty "v1 CRL" property_crl_v1
+                    , testProperty "PSS default parameters" property_pss_default
                     ]
                 , testGroup
                     "signature-alg-parameters"

@@ -16,6 +16,10 @@ module Data.X509.Internal (
     runErrT,
     safeDecode,
     safeCharacterToString,
+
+    -- * time
+    asn1TimeToUTC,
+    encodeASN1Time,
 ) where
 
 import Control.Exception (
@@ -29,12 +33,29 @@ import Control.Exception (
 import Control.Monad.Trans.Except
 import Data.ASN1.Parse
 import Data.ASN1.Types
+import Data.Hourglass
 import qualified Data.List as L
 import System.IO.Unsafe (unsafeDupablePerformIO)
 
 runErrT :: ExceptT e m a -> m (Either e a)
 runErrT = runExceptT
 type ErrT = ExceptT
+
+-- | A decoded time converted to UTC with its zone offset.
+asn1TimeToUTC :: DateTime -> Maybe TimezoneOffset -> DateTime
+asn1TimeToUTC t (Just (TimezoneOffset m))
+    | m /= 0 = timeAdd t (Seconds (fromIntegral (negate m) * 60))
+asn1TimeToUTC t _ = t
+
+-- | RFC 5280 4.1.2.5: UTCTime through 2049 from 1950, GeneralizedTime
+-- otherwise.
+encodeASN1Time :: DateTime -> ASN1
+encodeASN1Time t = ASN1Time ty t (Just (TimezoneOffset 0))
+  where
+    y = dateYear (dtDate t)
+    ty
+        | y >= 1950 && y < 2050 = TimeUTC
+        | otherwise = TimeGeneralized
 
 -- | create a container around the stream of ASN1
 asn1Container :: ASN1ConstructionType -> [ASN1] -> [ASN1]

@@ -43,7 +43,7 @@ import Data.ASN1.BitArray
 import Data.ASN1.Encoding
 import Data.ASN1.Parse
 import Data.ASN1.Types
-import Data.Bits (shiftR, testBit, (.&.))
+import Data.Bits (bit, shiftR, testBit, (.&.), (.|.))
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Char8 as BC
 import Data.List (find)
@@ -150,6 +150,10 @@ instance Extension ExtBasicConstraints where
         | otherwise = Left "invalid pathlen"
     extDecode [Start Sequence, Boolean b, End Sequence] = Right (ExtBasicConstraints b Nothing)
     extDecode [Start Sequence, End Sequence] = Right (ExtBasicConstraints False Nothing)
+    -- cA is omitted when FALSE (DER)
+    extDecode [Start Sequence, IntVal v, End Sequence]
+        | v >= 0 = Right (ExtBasicConstraints False (Just v))
+        | otherwise = Left "invalid pathlen"
     extDecode _ = Left "unknown sequence"
 
 -- | Describe key usage
@@ -260,8 +264,17 @@ instance Extension ExtAuthorityKeyId where
     extHasNestedASN1 = const True
     extEncode (ExtAuthorityKeyId keyid) =
         [Start Sequence, Other Context 0 keyid, End Sequence]
-    extDecode [Start Sequence, Other Context 0 keyid, End Sequence] =
-        Right $ ExtAuthorityKeyId keyid
+
+    -- authorityCertIssuer and authorityCertSerialNumber are not kept
+    extDecode (Start Sequence : Other Context 0 keyid : rest)
+        | issuerSerial rest = Right $ ExtAuthorityKeyId keyid
+      where
+        issuerSerial [End Sequence] = True
+        issuerSerial (Start (Container Context 1) : xs) =
+            case dropWhile (/= End (Container Context 1)) xs of
+                _ : [Other Context 2 _, End Sequence] -> True
+                _ -> False
+        issuerSerial _ = False
     extDecode _ = Left "unknown sequence"
 
 -- | Identify how CRL information is obtained
@@ -412,10 +425,17 @@ bitsToFlags lastFlag bits =
     dataLen = 8 * fromIntegral (B.length (bitArrayGetData bits))
     len = minimum [bitArrayLength bits, dataLen, fromIntegral (fromEnum lastFlag) + 1]
 
+-- | DER: trailing zero bits are removed.
 flagsToBits :: Enum a => [a] -> BitArray
-flagsToBits flags = foldl bitArraySetBit bitArrayEmpty $ map (fromIntegral . fromEnum) flags
+flagsToBits flags = toBitArray (B.pack bytes) (8 * nbytes - len)
   where
-    bitArrayEmpty = toBitArray (B.pack [0, 0]) 7
+    ixs = map fromEnum flags
+    len = if null ixs then 0 else maximum ixs + 1
+    nbytes = (len + 7) `div` 8
+    bytes =
+        [ foldl (.|.) 0 [bit (7 - i `mod` 8) | i <- ixs, i `div` 8 == n]
+        | n <- [0 .. nbytes - 1]
+        ]
 
 data ExtNetscapeComment = ExtNetscapeComment B.ByteString
     deriving (Show, Eq)

@@ -16,7 +16,7 @@ module Data.X509.CRL (
 ) where
 
 import Data.ASN1.Types
-import Data.Hourglass (DateTime, TimezoneOffset (..))
+import Data.Hourglass (DateTime)
 
 import Data.X509.AlgorithmIdentifier
 import Data.X509.DistinguishedName
@@ -56,12 +56,12 @@ instance ASN1Object RevokedCertificate where
                     <*> (getNext >>= toTime)
                     <*> getObject
       where
-        toTime (ASN1Time _ t _) = pure t
+        toTime (ASN1Time _ t z) = pure (asn1TimeToUTC t z)
         toTime _ = throwParseError "bad revocation date"
     toASN1 (RevokedCertificate serial time crlEntryExtensions) = \xs ->
         [Start Sequence]
             ++ [IntVal serial]
-            ++ [ASN1Time TimeGeneralized time (Just (TimezoneOffset 0))]
+            ++ [encodeASN1Time time]
             ++ toASN1 crlEntryExtensions []
             ++ [End Sequence]
             ++ xs
@@ -76,7 +76,8 @@ parseSerialNumber = do
 parseCRL :: ParseASN1 CRL
 parseCRL = do
     CRL
-        <$> (getNext >>= getVersion)
+        -- the version is absent in v1 CRLs
+        <$> (maybe 0 id <$> getNextMaybe getVersion)
         <*> getObject
         <*> getObject
         <*> (getNext >>= getThisUpdate)
@@ -84,15 +85,15 @@ parseCRL = do
         <*> parseRevokedCertificates
         <*> parseCRLExtensions
   where
-    getVersion (IntVal v) = return $ fromIntegral v
-    getVersion _ = throwParseError "unexpected type for version"
+    getVersion (IntVal v) = Just v
+    getVersion _ = Nothing
 
-    getThisUpdate (ASN1Time _ t1 _) = return t1
+    getThisUpdate (ASN1Time _ t1 z) = return (asn1TimeToUTC t1 z)
     getThisUpdate _ = throwParseError "bad this update format, expecting time"
 
     getNextUpdate = getNextMaybe timeOrNothing
 
-    timeOrNothing (ASN1Time _ tnext _) = Just tnext
+    timeOrNothing (ASN1Time _ tnext z) = Just (asn1TimeToUTC tnext z)
     timeOrNothing _ = Nothing
 
 parseRevokedCertificates :: ParseASN1 [RevokedCertificate]
@@ -108,15 +109,11 @@ parseCRLExtensions =
 
 encodeCRL :: CRL -> ASN1S
 encodeCRL crl xs =
-    [IntVal $ crlVersion crl]
+    [IntVal (crlVersion crl) | crlVersion crl /= 0]
         ++ toASN1 (crlSignatureAlg crl) []
         ++ toASN1 (crlIssuer crl) []
-        ++ [ASN1Time TimeGeneralized (crlThisUpdate crl) (Just (TimezoneOffset 0))]
-        ++ ( maybe
-                []
-                (\t -> [ASN1Time TimeGeneralized t (Just (TimezoneOffset 0))])
-                (crlNextUpdate crl)
-           )
+        ++ [encodeASN1Time (crlThisUpdate crl)]
+        ++ maybe [] (\t -> [encodeASN1Time t]) (crlNextUpdate crl)
         ++ maybeRevoked (crlRevokedCertificates crl)
         ++ maybeCrlExts (crlExtensions crl)
         ++ xs
