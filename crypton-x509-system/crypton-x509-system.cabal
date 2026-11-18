@@ -44,10 +44,8 @@ library
     if os(windows)
         exposed-modules: System.X509.Win32
         cpp-options:     -DWINDOWS
+        c-sources:       cbits/win32.c
         extra-libraries: Crypt32
-        build-depends:
-            Win32,
-            crypton-asn1-encoding
 
     if os(osx)
         cpp-options: -DMACOSX
