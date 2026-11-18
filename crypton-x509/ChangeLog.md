@@ -6,6 +6,8 @@
   [#32](https://github.com/kazu-yamamoto/crypton-certificate/pull/32)
 * Make certificate parsing stricter
   [#39](https://github.com/kazu-yamamoto/crypton-certificate/pull/39)
+* Accept and encode valid structures in crypton-x509
+  [#46](https://github.com/kazu-yamamoto/crypton-certificate/pull/46)
 
 ## 1.10.2
 

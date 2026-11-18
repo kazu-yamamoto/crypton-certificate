@@ -4,6 +4,8 @@
 
 * Harden certificate validation
   [#44](https://github.com/kazu-yamamoto/crypton-certificate/pull/44)
+* Accept and encode valid structures in crypton-x509
+  [#46](https://github.com/kazu-yamamoto/crypton-certificate/pull/46)
 
 ## 1.10.2
 
