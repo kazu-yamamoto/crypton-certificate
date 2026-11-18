@@ -443,7 +443,10 @@ validatePure validationTime hooks checks store (fqhn, _) (CertificateChain (top 
             Just (Left e) -> Just (Left e)
             Nothing -> Nothing
         mpurposes = case extensionGetE $ certExtensions cert of
-            Just (Right (ExtExtendedKeyUsage keyPurposes)) -> Just (Right keyPurposes)
+            -- anyExtendedKeyUsage does not restrict the purposes
+            Just (Right (ExtExtendedKeyUsage keyPurposes))
+                | KeyUsagePurpose_Unknown [2, 5, 29, 37, 0] `elem` keyPurposes -> Nothing
+                | otherwise -> Just (Right keyPurposes)
             Just (Left e) -> Just (Left e)
             Nothing -> Nothing
         -- compare a list of things to an expected list. the expected list
