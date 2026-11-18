@@ -1,4 +1,6 @@
 {-# LANGUAGE CPP #-}
+{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE ViewPatterns #-}
 
 -- |
 -- Module      : Data.X509.DistinguishedName
@@ -9,7 +11,10 @@
 --
 -- X.509 Distinguished names types and functions
 module Data.X509.DistinguishedName (
-    DistinguishedName (..),
+    DistinguishedName (DistinguishedName, getDistinguishedElements),
+    RelativeDistinguishedName,
+    getRDNs,
+    fromRDNs,
     DistinguishedNameInner (..),
     ASN1CharacterString (..),
     -- Distinguished Name Elements
@@ -23,11 +28,36 @@ import           Data.Semigroup
 #endif
 import Data.ASN1.Types
 import Data.Char (toLower)
+import Data.List (sort)
 import Data.X509.Internal
 
--- | A list of OID and strings.
-newtype DistinguishedName = DistinguishedName {getDistinguishedElements :: [(OID, ASN1CharacterString)]}
+-- | A sequence of relative distinguished names.  The constructor is
+-- hidden; use 'getRDNs' and 'fromRDNs', or the 'DistinguishedName' pattern
+-- for names without multi-valued RDNs.
+newtype DistinguishedName = RDNSequence [RelativeDistinguishedName]
     deriving (Show, Eq, Ord)
+
+-- | A set of attribute types and values, usually with one element.
+type RelativeDistinguishedName = [(OID, ASN1CharacterString)]
+
+-- | The relative distinguished names.
+getRDNs :: DistinguishedName -> [RelativeDistinguishedName]
+getRDNs (RDNSequence rdns) = rdns
+
+-- | A name from relative distinguished names.
+fromRDNs :: [RelativeDistinguishedName] -> DistinguishedName
+fromRDNs = RDNSequence
+
+-- | All attributes in order, flattening multi-valued RDNs.  Constructing
+-- makes one RDN per attribute.
+pattern DistinguishedName
+    :: [(OID, ASN1CharacterString)] -> DistinguishedName
+pattern DistinguishedName{getDistinguishedElements} <-
+    (concat . getRDNs -> getDistinguishedElements)
+    where
+        DistinguishedName els = RDNSequence (map (: []) els)
+
+{-# COMPLETE DistinguishedName #-}
 
 -- | Elements commonly available in a 'DistinguishedName' structure
 data DnElement
@@ -52,14 +82,15 @@ instance OIDable DnElement where
 
 -- | Try to get a specific element in a 'DistinguishedName' structure
 getDnElement :: DnElement -> DistinguishedName -> Maybe ASN1CharacterString
-getDnElement element (DistinguishedName els) = lookup (getObjectID element) els
+getDnElement element dn = lookup (getObjectID element) $ getDistinguishedElements dn
 
 -- | A form for comparing names (RFC 5280 7.1): string values are
--- converted to UTF8String, lower-cased and whitespace is folded.  Values
+-- converted to UTF8String, lower-cased and whitespace is folded, and the
+-- attributes of each RDN are sorted.  Values
 -- that cannot be decoded are kept.
 canonicalDistinguishedName :: DistinguishedName -> DistinguishedName
-canonicalDistinguishedName (DistinguishedName els) =
-    DistinguishedName [(oid, canon v) | (oid, v) <- els]
+canonicalDistinguishedName (RDNSequence rdns) =
+    RDNSequence [sort [(oid, canon v) | (oid, v) <- rdn] | rdn <- rdns]
   where
     canon v = case safeCharacterToString v of
         Just str -> asn1CharacterString UTF8 $ unwords $ words $ map toLower str
@@ -72,13 +103,13 @@ newtype DistinguishedNameInner = DistinguishedNameInner DistinguishedName
 
 #if MIN_VERSION_base(4,9,0)
 instance Semigroup DistinguishedName where
-    DistinguishedName l1 <> DistinguishedName l2 = DistinguishedName (l1++l2)
+    RDNSequence l1 <> RDNSequence l2 = RDNSequence (l1++l2)
 #endif
 
 instance Monoid DistinguishedName where
-    mempty = DistinguishedName []
+    mempty = RDNSequence []
 #if !(MIN_VERSION_base(4,11,0))
-    mappend (DistinguishedName l1) (DistinguishedName l2) = DistinguishedName (l1++l2)
+    mappend (RDNSequence l1) (RDNSequence l2) = RDNSequence (l1++l2)
 #endif
 
 instance ASN1Object DistinguishedName where
@@ -90,15 +121,15 @@ instance ASN1Object DistinguishedName where
 instance ASN1Object DistinguishedNameInner where
     toASN1 (DistinguishedNameInner dn) = \xs -> encodeDNinner dn ++ xs
     fromASN1 =
-        runParseASN1State (DistinguishedNameInner . DistinguishedName <$> parseDNInner)
+        runParseASN1State (DistinguishedNameInner . RDNSequence <$> parseDNInner)
 
 parseDN :: ParseASN1 DistinguishedName
-parseDN = DistinguishedName <$> onNextContainer Sequence parseDNInner
+parseDN = RDNSequence <$> onNextContainer Sequence parseDNInner
 
-parseDNInner :: ParseASN1 [(OID, ASN1CharacterString)]
-parseDNInner = concat `fmap` getMany parseOneDN
+parseDNInner :: ParseASN1 [RelativeDistinguishedName]
+parseDNInner = getMany parseOneDN
 
-parseOneDN :: ParseASN1 [(OID, ASN1CharacterString)]
+parseOneDN :: ParseASN1 RelativeDistinguishedName
 parseOneDN = onNextContainer Set $ getMany $ do
     s <- getNextContainer Sequence
     case s of
@@ -107,9 +138,10 @@ parseOneDN = onNextContainer Set $ getMany $ do
             throwParseError ("expecting [OID,String] got " ++ show s)
 
 encodeDNinner :: DistinguishedName -> [ASN1]
-encodeDNinner (DistinguishedName dn) = concatMap dnSet dn
+encodeDNinner (RDNSequence rdns) = concatMap rdnSet rdns
   where
-    dnSet (oid, cs) = asn1Container Set $ asn1Container Sequence [OID oid, ASN1String cs]
+    rdnSet rdn = asn1Container Set $ concatMap atv rdn
+    atv (oid, cs) = asn1Container Sequence [OID oid, ASN1String cs]
 
 encodeDN :: DistinguishedName -> [ASN1]
 encodeDN dn = asn1Container Sequence $ encodeDNinner dn

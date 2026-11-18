@@ -904,6 +904,26 @@ property_pss_default =
         , End Sequence
         ]
 
+-- Multi-valued RDNs are kept and differ from separate RDNs; the canonical
+-- form ignores the order inside an RDN.
+property_multi_valued_rdn :: Bool
+property_multi_valued_rdn =
+    decode (encode multi) == Right (multi, [])
+        && encodeASN1' DER (encode multi) /= encodeASN1' DER (encode single)
+        && multi /= single
+        && getDistinguishedElements multi == getDistinguishedElements single
+        && single == fromRDNs [[cn], [o]]
+        && canonicalDistinguishedName multi
+            == canonicalDistinguishedName (fromRDNs [[o, cn]])
+        && getDnElement DnOrganization multi == Just (snd o)
+  where
+    cn = (getObjectID DnCommonName, asn1CharacterString UTF8 "a")
+    o = (getObjectID DnOrganization, asn1CharacterString UTF8 "o")
+    multi = fromRDNs [[cn, o]]
+    single = DistinguishedName [cn, o]
+    encode dn = toASN1 dn []
+    decode l = fromASN1 l :: Either String (DistinguishedName, [ASN1])
+
 -- Non-default PSS parameters are kept, explicit defaults are normalized,
 -- and trailer fields other than 1 are rejected.
 property_pss_params :: Bool
@@ -1056,6 +1076,7 @@ main =
                     , testProperty "v1 CRL" property_crl_v1
                     , testProperty "PSS default parameters" property_pss_default
                     , testProperty "PSS parameters" property_pss_params
+                    , testProperty "multi-valued RDN" property_multi_valued_rdn
                     , testProperty "EC private key length" property_ec_privkey_length
                     , testProperty "EC curve name" property_ec_curve_name
                     ]

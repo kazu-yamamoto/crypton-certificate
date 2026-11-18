@@ -4,6 +4,8 @@
 
 * Keep RSA-PSS parameters
   [#53](https://github.com/kazu-yamamoto/crypton-certificate/pull/53)
+* Keep multi-valued RDNs
+  [#54](https://github.com/kazu-yamamoto/crypton-certificate/pull/54)
 
 ## 1.10.3
 

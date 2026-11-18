@@ -844,16 +844,12 @@ uriHost uri = case break (== ':') uri of
                 else Just host
     _ -> Nothing
 
--- | The subtree is a prefix of the name.  Attribute values are compared
--- case-insensitively with whitespace folded.
+-- | The subtree is a prefix of the name, comparing RDNs in the canonical
+-- form.
 dnInSubtree :: DistinguishedName -> DistinguishedName -> Bool
-dnInSubtree (DistinguishedName n) (DistinguishedName c) =
-    length c <= length n && and (zipWith eq n c)
+dnInSubtree n c = canon c `isPrefixOf` canon n
   where
-    eq (o1, v1) (o2, v2) = o1 == o2 && norm v1 == norm v2
-    norm v = case safeCharacterToString v of
-        Just str -> Right $ unwords $ words $ map toLower str
-        Nothing -> Left v
+    canon = getRDNs . canonicalDistinguishedName
 
 -- | An IPv4 or IPv6 address against an address with a mask.
 ipInSubtree :: ByteString -> ByteString -> NameMatch
