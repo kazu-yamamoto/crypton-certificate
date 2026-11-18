@@ -27,6 +27,7 @@ import qualified Data.ByteString.Char8 as BC
 import qualified Data.Map as M
 import Data.PEM (PEM, pemContent, pemName, pemParseBS)
 import Data.X509
+import Data.X509.ReadFile (readFileCloexec)
 import System.Directory (
     doesDirectoryExist,
     doesFileExist,
@@ -129,7 +130,7 @@ readCertificateStore path = do
 readCertificates :: FilePath -> IO [SignedCertificate]
 readCertificates file =
     E.catchIOError
-        (rights . map getCert . filter isCert . pemBlocks <$> B.readFile file)
+        (rights . map getCert . filter isCert . pemBlocks <$> readFileCloexec file)
         skipIOError
   where
     isCert pem = pemName pem `elem` ["CERTIFICATE", "X509 CERTIFICATE"]

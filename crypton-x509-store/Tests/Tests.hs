@@ -9,6 +9,7 @@ import Data.Maybe (isJust, isNothing)
 import Data.String (fromString)
 import Data.X509
 import Data.X509.CertificateStore
+import Data.X509.File
 import Data.X509.Memory
 import System.Directory
 import System.FilePath ((</>))
@@ -403,11 +404,12 @@ keyOrderTest =
     testCase "Key order" $
         map kind (readKeyFileFromMemory (rsaKey2 <> ed25519Key2 <> dsaKey2))
             @?= ["RSA", "Ed25519", "DSA"]
-  where
-    kind PrivKeyRSA{} = "RSA"
-    kind PrivKeyEd25519{} = "Ed25519"
-    kind PrivKeyDSA{} = "DSA"
-    kind _ = "other" :: String
+
+kind :: PrivKey -> String
+kind PrivKeyRSA{} = "RSA"
+kind PrivKeyEd25519{} = "Ed25519"
+kind PrivKeyDSA{} = "DSA"
+kind _ = "other"
 
 -- | Runs an action in a fresh temporary directory.
 withTempDir :: (FilePath -> IO a) -> IO a
@@ -457,6 +459,16 @@ storeTests =
             let store = makeCertificateStore $ readSignedObjectFromMemory rsaCertificate
                 dn = DistinguishedName [([2, 5, 4, 3], asn1CharacterString Printable " TEST ")]
             assertBool "not found" $ isJust $ findCertificate dn store
+        , testCase "key file order" $ withTempDir $ \dir -> do
+            let file = dir </> "keys.pem"
+            B.writeFile file $ rsaKey2 <> ed25519Key2 <> dsaKey2
+            keys <- readKeyFile file
+            map kind keys @?= ["RSA", "Ed25519", "DSA"]
+        , testCase "signed object file" $ withTempDir $ \dir -> do
+            let file = dir </> "cert.pem"
+            B.writeFile file rsaCertificate
+            certs <- readSignedObject file :: IO [SignedCertificate]
+            length certs @?= 1
         , testCase "composed empty store is empty" $
             assertBool "not empty" $
                 isEmptyCertificateStore (mempty <> mempty)
