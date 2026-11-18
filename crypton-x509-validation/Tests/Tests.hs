@@ -6,6 +6,7 @@ import Control.Monad (unless)
 import Crypto.Hash.Algorithms
 
 import qualified Crypto.PubKey.DSA as DSA
+import qualified Crypto.PubKey.ECC.ECDSA as ECDSA
 import qualified Crypto.PubKey.ECC.Types as ECC
 import qualified Crypto.PubKey.RSA as RSA
 import qualified Crypto.PubKey.RSA.PSS as PSS
@@ -16,7 +17,6 @@ import Data.ASN1.Encoding (encodeASN1')
 import Data.ASN1.Types
 
 import Data.Default
-import Data.Monoid
 import Data.String (fromString)
 import Data.X509
 import Data.X509.CertificateStore
@@ -833,12 +833,123 @@ testBadKeys =
                 @?= SignatureFailed SignatureInvalid
         ]
 
+-- | Validity period around the current date.
+currentValidity :: IO (DateTime, DateTime)
+currentValidity = do
+    today <- timeGetDate <$> timeCurrent
+    let d y = mkDateTime $ today `dateAddPeriod` mempty{periodYears = y}
+    return (d (-1), d 1)
+
+-- | Validates a chain against a store for www.example.com.
+validateExample :: CertificateStore -> [SignedCertificate] -> IO [FailedReason]
+validateExample store chain =
+    validate
+        HashSHA256
+        defaultHooks
+        defaultChecks
+        store
+        def
+        ("www.example.com", fromString ":443")
+        (CertificateChain chain)
+
+exampleSAN :: ExtensionRaw
+exampleSAN = sanExt [AltNameDNS "www.example.com"]
+
+-- | A trust anchor that is not a CA can only validate itself.
+testNonCAAnchor :: IO (RData pub priv) -> TestTree
+testNonCAAnchor res =
+    testGroup
+        "non-CA anchor"
+        [ testWithRes res "as issuer" $ \rd -> do
+            anchor <-
+                mkCertificate 2 50 (mkDn "NotCA Root") (present rd) [notCA] Self (keys1 rd)
+            leaf <-
+                mkCertificate
+                    2
+                    51
+                    (mkDn "leaf")
+                    (present rd)
+                    [exampleSAN]
+                    (CA anchor)
+                    (keys2 rd)
+            actual <- validateExample (mkStore [anchor]) [pairSignedCert leaf]
+            actual @?= [NotAnAuthority]
+        , testWithRes res "as itself" $ \rd -> do
+            self <-
+                mkCertificate
+                    2
+                    52
+                    (mkDn "self")
+                    (present rd)
+                    [notCA, exampleSAN]
+                    Self
+                    (keys3 rd)
+            actual <- validateExample (mkStore [self]) [pairSignedCert self]
+            actual @?= []
+        ]
+  where
+    notCA = mkExtension True $ ExtBasicConstraints False Nothing
+
+-- | The outer signature algorithm must match the one in the TBS.
+testSignatureAlgMismatch :: TestTree
+testSignatureAlgMismatch = testCase "signature algorithm mismatch" $ do
+    validity <- currentValidity
+    let alg = AlgEC ECC.SEC_p256r1 hashSHA256
+    rootPair <-
+        generateKeys alg >>= mkCA 1 "Mismatch Root" validity (Just bc) Nothing Self
+    let rootCert = signedObject $ getSigned $ pairSignedCert rootPair
+        cert =
+            Certificate
+                { certVersion = 2
+                , certSerial = 2
+                , certSignatureAlg = SignatureALG HashSHA384 PubKeyALG_EC
+                , certIssuerDN = certSubjectDN rootCert
+                , certValidity = validity
+                , certSubjectDN = mkDn "leaf"
+                , certPubKey = certPubKey rootCert
+                , certExtensions = Extensions (Just [exampleSAN])
+                }
+        sign raw = do
+            sig <- ECDSA.sign (pairKey rootPair) SHA256 raw
+            let der =
+                    encodeASN1'
+                        DER
+                        [ Start Sequence
+                        , IntVal (ECDSA.sign_r sig)
+                        , IntVal (ECDSA.sign_s sig)
+                        , End Sequence
+                        ]
+            return (der, SignatureALG HashSHA256 PubKeyALG_EC)
+    leaf <- objectToSignedExactF sign cert
+    actual <- validateExample (mkStore [rootPair]) [leaf]
+    actual @?= [InvalidSignature SignatureInvalid]
+  where
+    bc = ExtBasicConstraints True Nothing
+
+-- | Certificates signed with MD5 are rejected.
+testWeakHash :: TestTree
+testWeakHash = testCase "MD5 signature" $ do
+    validity <- currentValidity
+    keys <- generateKeys (AlgRSA 1024 hashMD5)
+    rootPair <- mkCA 1 "MD5 Root" validity (Just bc) Nothing Self keys
+    leaf <- mkCertificate 2 2 (mkDn "leaf") validity [exampleSAN] (CA rootPair) keys
+    actual <- validateExample (mkStore [rootPair]) [pairSignedCert leaf]
+    actual @?= [InvalidSignature SignatureUnimplemented]
+  where
+    bc = ExtBasicConstraints True Nothing
+
 -- | Regression tests that do not depend on the signature algorithm.
 treeRegression :: TestTree
 treeRegression = withResource (initData AlgEd25519) freeData $ \res ->
     testGroup
         "regression"
         [ testGroup
+            "hardening"
+            [ testNonCAAnchor res
+            , testSignatureAlgMismatch
+            , testWeakHash
+            ]
+        , testGroup
             "name-constraints"
             [ testNameConstraints
                 res
@@ -1336,6 +1447,7 @@ treeWithAlg groupName alg = withResource (initData alg) freeData $ \res ->
                     True
                     [NameMismatch "example.com"]
                 , testSubjectAltName res "*.example.com" "www.example.com" True []
+                , testSubjectAltName res "*.com" "example.com" True [NameMismatch "example.com"]
                 , testSubjectAltName res "*.example.com" "www.EXAMPLE.com" True []
                 , testSubjectAltName res "*.example.com" "www2.example.com" True []
                 , testSubjectAltName

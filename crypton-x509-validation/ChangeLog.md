@@ -1,5 +1,10 @@
 # ChangeLog for crypton-x509-validation
 
+## 1.10.3
+
+* Harden certificate validation
+  [#44](https://github.com/kazu-yamamoto/crypton-certificate/pull/44)
+
 ## 1.10.2
 
 * Fix host name validation with iPAddress SANs: an IP address is
