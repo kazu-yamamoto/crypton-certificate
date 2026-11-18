@@ -1,5 +1,10 @@
 # ChangeLog for crypton-x509-system
 
+## 1.10.1
+
+* macOS: load TLS anchors according to trust settings
+  [#37](https://github.com/kazu-yamamoto/crypton-certificate/pull/37)
+
 ## 1.10.0
 
 * Follow the breaking change in `crypton-x509` 1.10.0
