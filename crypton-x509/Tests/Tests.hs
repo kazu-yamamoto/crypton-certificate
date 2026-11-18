@@ -479,9 +479,18 @@ instance Arbitrary AltName where
             , AltNameURI . ("https://" ++) <$> arbitraryHost
             , AltNameIP . B.pack <$> (elements [4, 16] >>= vector)
             , AltNameDN <$> arbitrary
+            , AltNameOther <$> arbitraryOID <*> der
+            , AltNameX400 <$> der
+            , AltNameEDIParty <$> der
+            , AltNameRegisteredID <$> arbitraryOID
             ]
       where
         arbitraryHost = listOf1 (elements "abcxyz.-")
+        der = (\n -> encodeASN1' DER [IntVal n]) <$> arbitrary
+        arbitraryOID = do
+            a <- choose (0, 2)
+            b <- if a < 2 then choose (0, 39) else choose (0, 1000)
+            (\xs -> a : b : xs) <$> listOf (getNonNegative <$> arbitrary)
 
 instance Arbitrary GeneralSubtree where
     arbitrary =
@@ -554,27 +563,32 @@ property_malformed_extensions =
     isLeft = either (const True) (const False)
 
 -- Unsupported GeneralName types in a SAN are skipped, but not in constraints.
-property_san_skips_unknown :: Bool
-property_san_skips_unknown =
-    extDecode
-        ( [Start Sequence]
+property_san_keeps_names :: Bool
+property_san_keeps_names =
+    extDecode san == Right (ExtSubjectAltName names)
+        && extEncode (ExtSubjectAltName names) == san
+        && extDecode nc
+            == Right
+                (ExtNameConstraints [GeneralSubtree (AltNameRegisteredID [1, 2, 3]) 0 Nothing] [])
+  where
+    san =
+        [Start Sequence]
             ++ registeredID
             ++ [Other Context 2 (B.pack [0x61])]
             ++ otherName
             ++ [Start (Container Context 4)]
             ++ toASN1 dn [End (Container Context 4)]
             ++ [End Sequence]
-        )
-        == Right (ExtSubjectAltName [AltNameDNS "a", AltNameDN dn])
-        && isLeft
-            ( extDecode
-                ( [Start Sequence, Start (Container Context 0), Start Sequence]
-                    ++ registeredID
-                    ++ [End Sequence, End (Container Context 0), End Sequence]
-                )
-                :: Either String ExtNameConstraints
-            )
-  where
+    names =
+        [ AltNameRegisteredID [1, 2, 3]
+        , AltNameDNS "a"
+        , AltNameOther [1, 2, 3] (encodeASN1' DER [IntVal 1])
+        , AltNameDN dn
+        ]
+    nc =
+        [Start Sequence, Start (Container Context 0), Start Sequence]
+            ++ registeredID
+            ++ [End Sequence, End (Container Context 0), End Sequence]
     dn = DistinguishedName [(getObjectID DnCommonName, asn1CharacterString UTF8 "x")]
     registeredID = [Other Context 8 (B.pack [0x2a, 0x03])]
     otherName =
@@ -585,7 +599,6 @@ property_san_skips_unknown =
         , End (Container Context 0)
         , End (Container Context 0)
         ]
-    isLeft = either (const True) (const False)
 
 -- A certificate whose validity cannot be decoded is rejected with 'Left'
 -- rather than an exception thrown lazily from the decoder.
@@ -1098,7 +1111,7 @@ main =
                     "malformed"
                     [ testProperty "key-usage unknown bits" property_key_usage_unknown_bits
                     , testProperty "extensions" property_malformed_extensions
-                    , testProperty "SAN skips unknown names" property_san_skips_unknown
+                    , testProperty "SAN keeps all name forms" property_san_keeps_names
                     , testProperty "lazy decode error" property_lazy_decode_error
                     , testProperty "signed object" property_signed_strict
                     , testProperty "duplicate extensions" property_duplicate_extensions

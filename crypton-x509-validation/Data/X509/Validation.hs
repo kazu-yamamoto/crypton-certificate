@@ -784,6 +784,11 @@ matchSubtree isExcluded name (GeneralSubtree base _ _) = case (name, base) of
     (AltNameURI n, AltNameURI c) -> maybe Unsupported (toMatch . (`hostInSubtree` c)) $ uriHost n
     (AltNameXMPP _, AltNameXMPP _) -> Unsupported
     (AltNameDNSSRV _, AltNameDNSSRV _) -> Unsupported
+    (AltNameOther o1 _, AltNameOther o2 _)
+        | o1 == o2 -> Unsupported
+    (AltNameX400 _, AltNameX400 _) -> Unsupported
+    (AltNameEDIParty _, AltNameEDIParty _) -> Unsupported
+    (AltNameRegisteredID _, AltNameRegisteredID _) -> Unsupported
     _ -> NotApplicable
   where
     toMatch b = if b then Matched else NotMatched

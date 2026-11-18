@@ -1218,6 +1218,24 @@ treeRegression = withResource (initData AlgEd25519) freeData $ \res ->
                 False
             , testNameConstraints
                 res
+                "excluded otherName"
+                [nameConstraints [] [upn "a@example.com"]]
+                Nothing
+                leafDN
+                [sanExt [dns "www.example.com", upn "b@example.com"]]
+                "www.example.com"
+                False
+            , testNameConstraints
+                res
+                "otherName under DNS constraints"
+                [nameConstraints [dns "example.com"] []]
+                Nothing
+                leafDN
+                [sanExt [dns "www.example.com", upn "b@example.com"]]
+                "www.example.com"
+                True
+            , testNameConstraints
+                res
                 "excluded by wildcard"
                 [nameConstraints [] [dns "www.example.com"]]
                 Nothing
@@ -1404,6 +1422,11 @@ treeRegression = withResource (initData AlgEd25519) freeData $ \res ->
   where
     dns = AltNameDNS
     ip = AltNameIP . BS.pack
+    -- Microsoft UPN otherName
+    upn u =
+        AltNameOther
+            [1, 3, 6, 1, 4, 1, 311, 20, 2, 3]
+            (encodeASN1' DER [ASN1String $ asn1CharacterString UTF8 u])
     leafDN = mkDn "leaf"
     ncEx = nameConstraints [dns "example.com"] []
     raw oid asn1 = ExtensionRaw oid True (encodeASN1' DER asn1)

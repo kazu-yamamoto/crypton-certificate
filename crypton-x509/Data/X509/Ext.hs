@@ -226,13 +226,7 @@ instance Extension ExtSubjectKeyId where
     extDecode [OctetString o] = Right $ ExtSubjectKeyId o
     extDecode _ = Left "unknown sequence"
 
--- | Different naming scheme use by the extension.
---
--- Not all name types are available, missing:
--- otherName
--- x400Address
--- ediPartyName
--- registeredID
+-- | GeneralName (RFC 5280 4.2.1.6).
 data AltName
     = AltNameRFC822 String
     | AltNameDNS String
@@ -241,6 +235,15 @@ data AltName
     | AltNameIP B.ByteString
     | AltNameXMPP String
     | AltNameDNSSRV String
+    | -- | otherName other than XMPP and SRV: the type and the DER encoding
+      -- of the value
+      AltNameOther OID B.ByteString
+    | -- | x400Address: the DER encoding of the ORAddress contents
+      AltNameX400 B.ByteString
+    | -- | ediPartyName: the DER encoding of the EDIPartyName contents
+      AltNameEDIParty B.ByteString
+    | -- | registeredID
+      AltNameRegisteredID OID
     deriving (Show, Eq, Ord)
 
 -- | Provide a way to supply alternate name that can be
@@ -323,11 +326,11 @@ instance Extension ExtCrlDistributionPoints where
         parseDP = onNextContainer Sequence $ do
             name <- onNextContainerMaybe (Container Context 0) parseName
             _ <- getNextMaybe reasons
-            _ <- onNextContainerMaybe (Container Context 2) (getMany getAddrMaybe)
+            _ <- onNextContainerMaybe (Container Context 2) (getMany getAddr)
             return name
         parseName = do
             full <-
-                onNextContainerMaybe (Container Context 0) (catMaybes <$> getMany getAddrMaybe)
+                onNextContainerMaybe (Container Context 0) (getMany getAddr)
             case full of
                 Just names -> return $ DistributionPointFullName names
                 Nothing ->
@@ -344,10 +347,9 @@ instance Extension ExtCrlDistributionPoints where
         reasons (Other Context 1 _) = Just ()
         reasons _ = Nothing
 
--- | GeneralName types that 'AltName' cannot represent are skipped.
 parseGeneralNames :: ParseASN1 [AltName]
 parseGeneralNames = onNextContainer Sequence $ do
-    names <- catMaybes <$> getMany getAddrMaybe
+    names <- getMany getAddr
     forM_ names $ \name -> case name of
         AltNameIP ip
             | B.length ip /= 4 && B.length ip /= 16 ->
@@ -355,23 +357,16 @@ parseGeneralNames = onNextContainer Sequence $ do
         _ -> return ()
     return names
 
--- | Fails on GeneralName types that 'AltName' cannot represent.
 getAddr :: ParseASN1 AltName
-getAddr =
-    getAddrMaybe
-        >>= maybe (throwParseError "GeneralNames: unsupported name type") return
-
--- | 'Nothing' for a well-formed GeneralName of an unsupported type.
-getAddrMaybe :: ParseASN1 (Maybe AltName)
-getAddrMaybe = do
+getAddr = do
     m <- onNextContainerMaybe (Container Context 0) getComposedAddr
     case m of
         Just r -> return r
         Nothing -> do
             d <- onNextContainerMaybe (Container Context 4) getObject
             case d of
-                Just dn -> return $ Just $ AltNameDN dn
-                Nothing -> getUnsupportedOrSimpleAddr
+                Just dn -> return $ AltNameDN dn
+                Nothing -> getConstructedOrSimpleAddr
   where
     getComposedAddr = do
         n <- getNext
@@ -383,7 +378,7 @@ getAddrMaybe = do
                     Just [ASN1String cs] ->
                         case safeCharacterToString cs of
                             Nothing -> throwParseError ("GeneralNames: invalid string for XMPP Addr")
-                            Just s -> return $ Just $ AltNameXMPP s
+                            Just s -> return $ AltNameXMPP s
                     _ ->
                         throwParseError ("GeneralNames: expecting string for XMPP Addr got: " ++ show c)
             OID [1, 3, 6, 1, 5, 5, 7, 8, 7] -> do
@@ -393,34 +388,78 @@ getAddrMaybe = do
                     Just [ASN1String cs] ->
                         case safeCharacterToString cs of
                             Nothing -> throwParseError ("GeneralNames: invalid string for DNSSrv Addr")
-                            Just s -> return $ Just $ AltNameDNSSRV s
+                            Just s -> return $ AltNameDNSSRV s
                     _ ->
                         throwParseError
                             ("GeneralNames: expecting string for DNSSRV Addr got: " ++ show c)
-            OID _ -> getMany getNext >> return Nothing -- unknown otherName
+            OID oid -> do
+                c <- getNextContainerMaybe (Container Context 0)
+                case c of
+                    Just v@(_ : _) -> return $ AltNameOther oid (encodeASN1' DER v)
+                    _ -> throwParseError "GeneralNames: invalid otherName"
             _ -> throwParseError ("GeneralNames: expecting OID but got " ++ show n)
 
     getSimpleAddr = do
         n <- getNext
         case n of
-            (Other Context 1 b) -> return $ Just $ AltNameRFC822 $ BC.unpack b
-            (Other Context 2 b) -> return $ Just $ AltNameDNS $ BC.unpack b
+            (Other Context 1 b) -> return $ AltNameRFC822 $ BC.unpack b
+            (Other Context 2 b) -> return $ AltNameDNS $ BC.unpack b
             -- directoryName as written by older versions of this library
             (Other Context 4 b) -> case safeDecode (decodeASN1' DER b) of
                 Left e1 -> throwParseError e1
                 Right as -> case runParseASN1 getObject as of
-                    Right dn -> return $ Just $ AltNameDN dn
+                    Right dn -> return $ AltNameDN dn
                     Left e2 -> throwParseError e2
-            (Other Context 6 b) -> return $ Just $ AltNameURI $ BC.unpack b
-            (Other Context 7 b) -> return $ Just $ AltNameIP b
-            (Other Context 8 _) -> return Nothing -- registeredID
+            (Other Context 6 b) -> return $ AltNameURI $ BC.unpack b
+            (Other Context 7 b) -> return $ AltNameIP b
+            (Other Context 8 b) -> case decodeOID b of
+                Just oid -> return $ AltNameRegisteredID oid
+                Nothing -> throwParseError "GeneralNames: invalid registeredID"
             _ ->
                 throwParseError ("GeneralNames: not coping with unknown stream " ++ show n)
-    -- x400Address and ediPartyName are skipped
-    getUnsupportedOrSimpleAddr = do
+    getConstructedOrSimpleAddr = do
         x400 <- getNextContainerMaybe (Container Context 3)
-        edi <- maybe (getNextContainerMaybe (Container Context 5)) (return . Just) x400
-        maybe getSimpleAddr (const $ return Nothing) edi
+        case x400 of
+            Just v -> return $ AltNameX400 (encodeASN1' DER v)
+            Nothing -> do
+                edi <- getNextContainerMaybe (Container Context 5)
+                case edi of
+                    Just v -> return $ AltNameEDIParty (encodeASN1' DER v)
+                    Nothing -> getSimpleAddr
+
+-- | The content octets of an OBJECT IDENTIFIER.
+decodeOID :: B.ByteString -> Maybe OID
+decodeOID bs
+    | B.null bs || B.last bs >= 0x80 = Nothing
+    | otherwise = case subids (B.unpack bs) of
+        (x : xs)
+            | x < 40 -> Just (0 : x : xs)
+            | x < 80 -> Just (1 : (x - 40) : xs)
+            | otherwise -> Just (2 : (x - 80) : xs)
+        [] -> Nothing
+  where
+    subids [] = []
+    subids ws =
+        let (more, rest) = span (>= 0x80) ws
+         in case rest of
+                (w : rest') ->
+                    foldl (\a v -> a * 128 + fromIntegral (v .&. 0x7f)) 0 (more ++ [w])
+                        : subids rest'
+                [] -> []
+
+encodeOID :: OID -> B.ByteString
+encodeOID (a : b : xs) = B.pack $ concatMap base128 (a * 40 + b : xs)
+  where
+    base128 n =
+        let go 0 acc = acc
+            go m acc = go (m `shiftR` 7) ((fromIntegral (m .&. 0x7f) .|. 0x80) : acc)
+            lastByte = fromIntegral (n .&. 0x7f)
+         in go (n `shiftR` 7) [lastByte]
+encodeOID _ = B.empty
+
+-- | Decode the contents of a constructed field written as DER.
+derContents :: B.ByteString -> [ASN1]
+derContents = either (const []) id . decodeASN1' DER
 
 encodeGeneralNames :: [AltName] -> [ASN1]
 encodeGeneralNames names =
@@ -451,6 +490,15 @@ encodeAltName (AltNameDNSSRV n) =
     , End (Container Context 0)
     , End (Container Context 0)
     ]
+encodeAltName (AltNameOther oid v) =
+    [Start (Container Context 0), OID oid, Start (Container Context 0)]
+        ++ derContents v
+        ++ [End (Container Context 0), End (Container Context 0)]
+encodeAltName (AltNameX400 v) =
+    [Start (Container Context 3)] ++ derContents v ++ [End (Container Context 3)]
+encodeAltName (AltNameEDIParty v) =
+    [Start (Container Context 5)] ++ derContents v ++ [End (Container Context 5)]
+encodeAltName (AltNameRegisteredID oid) = [Other Context 8 $ encodeOID oid]
 
 -- | Bits beyond the last known flag (the first argument) or beyond the
 -- actual data (a bogus length) are ignored.
