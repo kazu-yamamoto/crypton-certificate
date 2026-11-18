@@ -27,7 +27,7 @@ import qualified Data.X509 as X509
 import Data.X509.EC as X509
 
 readKeyFileFromMemory :: B.ByteString -> [X509.PrivKey]
-readKeyFileFromMemory = either (const []) (catMaybes . foldl pemToKey []) . pemParseBS
+readKeyFileFromMemory = either (const []) (catMaybes . concatMap (pemToKey [])) . pemParseBS
 
 readSignedObjectFromMemory
     :: (ASN1Object a, Eq a, Show a)

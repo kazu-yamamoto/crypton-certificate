@@ -1,4 +1,5 @@
 {-# LANGUAGE CPP #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 module Data.X509.CertificateStore (
     CertificateStore,
@@ -14,25 +15,28 @@ module Data.X509.CertificateStore (
 
 import Data.Char (isDigit, isHexDigit)
 import Data.Either (rights)
-import Data.List (foldl', isPrefixOf)
-#if MIN_VERSION_base(4,9,0)
+import qualified Data.List as L
+#if !(MIN_VERSION_base(4,11,0))
 import           Data.Semigroup
-#else
-import           Data.Monoid
 #endif
 import qualified Control.Exception as E
 import Control.Monad (filterM, mplus)
 import qualified Data.ByteString as B
+import qualified Data.ByteString.Char8 as BC
 import qualified Data.Map as M
-import Data.PEM (pemContent, pemParseBS)
+import Data.PEM (PEM, pemContent, pemName, pemParseBS)
 import Data.X509
 import System.Directory (
     doesDirectoryExist,
     doesFileExist,
     getDirectoryContents,
+    pathIsSymbolicLink,
  )
-import System.FilePath ((</>))
+import System.FilePath (takeFileName, (</>))
 import qualified System.IO.Error as E
+#if !defined(mingw32_HOST_OS)
+import System.Posix.Files (getFileStatus, isRegularFile)
+#endif
 
 -- | A Collection of certificate or store of certificates.
 data CertificateStore
@@ -41,8 +45,7 @@ data CertificateStore
 
 isEmptyCertificateStore :: CertificateStore -> Bool
 isEmptyCertificateStore (CertificateStore m) = M.null m
-isEmptyCertificateStore (CertificateStores []) = True
-isEmptyCertificateStore _ = False
+isEmptyCertificateStore (CertificateStores l) = all isEmptyCertificateStore l
 
 #if MIN_VERSION_base(4,9,0)
 instance Semigroup CertificateStore where
@@ -63,7 +66,7 @@ append (CertificateStores l1) (CertificateStores l2) = CertificateStores (l1 ++ 
 
 -- | Create a certificate store out of a list of X509 certificate
 makeCertificateStore :: [SignedCertificate] -> CertificateStore
-makeCertificateStore = CertificateStore . foldl' accumulate M.empty
+makeCertificateStore = CertificateStore . L.foldl' accumulate M.empty
   where
     accumulate m x509 = M.insert (certSubjectDN $ getCertificate x509) x509 m
 
@@ -104,30 +107,54 @@ readCertificateStore path = do
 
 -- Try to read certificate from the content of a file.
 --
--- The file may contains multiple certificates
+-- The file may contains multiple certificates.  Only the PEM blocks
+-- labeled CERTIFICATE are used: a TRUSTED CERTIFICATE block carries
+-- OpenSSL trust settings, which are not interpreted.  Broken blocks
+-- are skipped.
 readCertificates :: FilePath -> IO [SignedCertificate]
 readCertificates file =
     E.catchIOError
-        (either (const []) (rights . map getCert) . pemParseBS <$> B.readFile file)
+        (rights . map getCert . filter isCert . pemBlocks <$> B.readFile file)
         skipIOError
   where
+    isCert pem = pemName pem `elem` ["CERTIFICATE", "X509 CERTIFICATE"]
     getCert = decodeSignedCertificate . pemContent
     skipIOError :: E.IOException -> IO [SignedCertificate]
     skipIOError _ = return []
+
+-- | Parse PEM blocks one by one so that a broken block does not
+-- discard the others.
+pemBlocks :: B.ByteString -> [PEM]
+pemBlocks = go . BC.lines
+  where
+    go ls = case dropWhile (not . B.isPrefixOf "-----BEGIN ") ls of
+        [] -> []
+        begin : rest -> case break (B.isPrefixOf "-----END ") rest of
+            (body, end : rest') ->
+                either (const []) id (pemParseBS $ BC.unlines (begin : body ++ [end]))
+                    ++ go rest'
+            _ -> []
 
 -- List all the path susceptible to contains a certificate in a directory
 --
 -- if the parameter is not a directory, hilarity follows.
 listDirectoryCerts :: FilePath -> IO [FilePath]
 listDirectoryCerts path =
-    getDirContents >>= filterM doesFileExist
+    getDirContents >>= filterM keep
   where
+    -- hashed names are usually symbolic links to other files in the
+    -- directory, but are regular files on Android, for instance
+    keep p = do
+        regular <- isRegular p
+        if regular && isHashedFile (takeFileName p)
+            then not <$> pathIsSymbolicLink p
+            else return regular
     isHashedFile s =
         length s == 10
             && isDigit (s !! 9)
             && (s !! 8) == '.'
             && all isHexDigit (take 8 s)
-    isCert x = (not $ isPrefixOf "." x) && (not $ isHashedFile x)
+    isCert x = not $ L.isPrefixOf "." x
 
     getDirContents =
         E.catchIOError
@@ -136,3 +163,12 @@ listDirectoryCerts path =
       where
         emptyPaths :: E.IOException -> IO [FilePath]
         emptyPaths _ = return []
+
+-- | Whether the path is a regular file, following symbolic links.
+isRegular :: FilePath -> IO Bool
+#if defined(mingw32_HOST_OS)
+isRegular = doesFileExist
+#else
+isRegular p =
+    E.catchIOError (isRegularFile <$> getFileStatus p) (\_ -> return False)
+#endif
