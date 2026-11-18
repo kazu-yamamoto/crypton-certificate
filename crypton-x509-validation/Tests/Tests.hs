@@ -1757,6 +1757,12 @@ treeWithAlg groupName alg = withResource (initData alg) freeData $ \res ->
                 [p1, p3]
                 [p2, p3]
                 [LeafKeyPurposeNotAllowed]
+            , testLeafKeyPurpose
+                res
+                "anyExtendedKeyUsage"
+                [p1, KeyUsagePurpose_Unknown [2, 5, 29, 37, 0]]
+                [p2, p3]
+                []
             ]
         , testExhaustive
             res

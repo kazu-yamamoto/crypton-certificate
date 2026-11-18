@@ -10,6 +10,8 @@
   [#46](https://github.com/kazu-yamamoto/crypton-certificate/pull/46)
 * Build certification paths with backtracking and implement CRL distribution points
   [#48](https://github.com/kazu-yamamoto/crypton-certificate/pull/48)
+* Small fixes for EC keys, RSA verification and EKU
+  [#50](https://github.com/kazu-yamamoto/crypton-certificate/pull/50)
 
 ## 1.10.2
 

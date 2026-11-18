@@ -11,9 +11,11 @@ import Control.Monad
 
 import Crypto.Debug (DebugShow (..))
 import Crypto.Error (throwCryptoError)
+import Crypto.Number.Serialize (i2ospOf_)
 import qualified Crypto.PubKey.Curve25519 as X25519
 import qualified Crypto.PubKey.Curve448 as X448
 import qualified Crypto.PubKey.DSA as DSA
+import qualified Crypto.PubKey.ECC.Prim as ECC
 import qualified Crypto.PubKey.ECC.Types as ECC
 import qualified Crypto.PubKey.Ed25519 as Ed25519
 import qualified Crypto.PubKey.Ed448 as Ed448
@@ -28,6 +30,7 @@ import Data.List (isInfixOf, nub, sort)
 import Data.Maybe (fromJust)
 import Data.Proxy (Proxy (..))
 import Data.X509
+import Data.X509.EC (ecPubKeyCurveName)
 
 import MLDSAKeys
 
@@ -851,6 +854,43 @@ property_crl_v1 =
             (Extensions Nothing)
     encoded = toASN1 crl []
 
+-- RFC 5915: the private key octet string is as long as the order.
+property_ec_privkey_length :: Bool
+property_ec_privkey_length =
+    [B.length o | OctetString o <- asn1] == [32]
+        && fromASN1 asn1 == Right (key, [])
+  where
+    key = PrivKeyEC (PrivKeyEC_Named ECC.SEC_p256r1 1)
+    asn1 = toASN1 key []
+
+-- Explicit parameters name a curve only if the generator and the
+-- cofactor match too.
+property_ec_curve_name :: Bool
+property_ec_curve_name =
+    ecPubKeyCurveName (explicit g 1) == Just ECC.SEC_p256r1
+        && ecPubKeyCurveName (explicit (ECC.pointMul curve 2 g) 1) == Nothing
+        && ecPubKeyCurveName (explicit g 2) == Nothing
+  where
+    curve = ECC.getCurveByName ECC.SEC_p256r1
+    cc = ECC.common_curve curve
+    p = case curve of
+        ECC.CurveFP (ECC.CurvePrime q _) -> q
+        _ -> 0
+    g = ECC.ecc_g cc
+    point (ECC.Point x y) = SerializedPoint (B.cons 4 (i2ospOf_ 32 x <> i2ospOf_ 32 y))
+    point ECC.PointO = SerializedPoint (B.singleton 0)
+    explicit gen h =
+        PubKeyEC_Prime
+            { pubkeyEC_pub = point g
+            , pubkeyEC_a = ECC.ecc_a cc
+            , pubkeyEC_b = ECC.ecc_b cc
+            , pubkeyEC_prime = p
+            , pubkeyEC_generator = point gen
+            , pubkeyEC_order = ECC.ecc_n cc
+            , pubkeyEC_cofactor = h
+            , pubkeyEC_seed = 0
+            }
+
 property_pss_default :: Bool
 property_pss_default =
     fromASN1 asn1 == Right (SignatureALG HashSHA1 PubKeyALG_RSAPSS, [])
@@ -973,6 +1013,8 @@ main =
                     , testProperty "validity time" property_validity_time
                     , testProperty "v1 CRL" property_crl_v1
                     , testProperty "PSS default parameters" property_pss_default
+                    , testProperty "EC private key length" property_ec_privkey_length
+                    , testProperty "EC curve name" property_ec_curve_name
                     ]
                 , testGroup
                     "signature-alg-parameters"

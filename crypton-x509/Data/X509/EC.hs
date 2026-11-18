@@ -84,7 +84,10 @@ ecPubKeyCurveName pub@PubKeyEC_Prime{} =
                 ECC.ecc_a cc == pubkeyEC_a pub
                     && ECC.ecc_b cc == pubkeyEC_b pub
                     && ECC.ecc_n cc == pubkeyEC_order pub
+                    && ECC.ecc_h cc == pubkeyEC_cofactor pub
                     && p == pubkeyEC_prime pub
+                    && unserializePoint (ECC.getCurveByName c) (pubkeyEC_generator pub)
+                        == Just (ECC.ecc_g cc)
             _ -> False
 
 -- | Return the EC curve associated to an EC Private Key.  This does not check
@@ -120,7 +123,10 @@ ecPrivKeyCurveName priv@PrivKeyEC_Prime{} =
                 ECC.ecc_a cc == privkeyEC_a priv
                     && ECC.ecc_b cc == privkeyEC_b priv
                     && ECC.ecc_n cc == privkeyEC_order priv
+                    && ECC.ecc_h cc == privkeyEC_cofactor priv
                     && p == privkeyEC_prime priv
+                    && unserializePoint (ECC.getCurveByName c) (privkeyEC_generator priv)
+                        == Just (ECC.ecc_g cc)
             _ -> False
 
 -- | Return the curve name associated to an OID

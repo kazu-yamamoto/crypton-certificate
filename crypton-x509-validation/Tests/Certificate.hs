@@ -1,4 +1,5 @@
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE TypeOperators #-}
 
 -- | Types and functions used to build test certificates.
 module Certificate (
@@ -29,6 +30,7 @@ module Certificate (
     mkLeaf,
 ) where
 
+import Crypto.Hash (hashWith)
 import Crypto.Hash.Algorithms
 import Crypto.Number.Serialize
 
@@ -157,9 +159,11 @@ getPubKey (AlgRSAPSS _ _ _) key = PubKeyRSA key
 getPubKey (AlgDSA _ _) key = PubKeyDSA key
 getPubKey (AlgEC name _) key = PubKeyEC (PubKeyEC_Named name pub)
   where
-    ECC.Point x y = ECDSA.public_q key
     pub = SerializedPoint bs
-    bs = B.cons 4 (i2ospOf_ bytes x `B.append` i2ospOf_ bytes y)
+    -- a generated public key is never the point at infinity
+    bs = case ECDSA.public_q key of
+        ECC.Point x y -> B.cons 4 (i2ospOf_ bytes x `B.append` i2ospOf_ bytes y)
+        ECC.PointO -> B.singleton 0
     bits = ECC.curveSizeBits (ECC.getCurveByName name)
     bytes = (bits + 7) `div` 8
 getPubKey AlgEd25519 key = PubKeyEd25519 key
@@ -181,7 +185,7 @@ getSignatureALG AlgMLDSA87 = SignatureALG_IntrinsicHash PubKeyALG_MLDSA87
 
 doSign :: Alg pub priv -> priv -> B.ByteString -> IO B.ByteString
 doSign (AlgRSA _ hash) key msg = do
-    result <- RSA.signSafer (Just $ getHashAlgorithm hash) key msg
+    result <- RSA.signSaferDigest key (hashWith (getHashAlgorithm hash) msg)
     case result of
         Left err -> error ("doSign(AlgRSA): " ++ show err)
         Right sigBits -> return sigBits
