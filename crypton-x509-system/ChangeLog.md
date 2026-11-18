@@ -6,6 +6,8 @@
   [#37](https://github.com/kazu-yamamoto/crypton-certificate/pull/37)
 * Fix trust store loading
   [#38](https://github.com/kazu-yamamoto/crypton-certificate/pull/38)
+* Windows: exclude disallowed roots and roots not enabled for TLS
+  [#45](https://github.com/kazu-yamamoto/crypton-certificate/pull/45)
 
 ## 1.10.0
 
