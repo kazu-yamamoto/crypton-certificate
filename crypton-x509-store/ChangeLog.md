@@ -2,6 +2,9 @@
 
 ## 1.10.1
 
+`TRUSTED CERTIFICATE` PEM blocks are no longer used as trust anchors,
+and several CAs with the same subject are kept.
+
 * Fix trust store loading
   [#38](https://github.com/kazu-yamamoto/crypton-certificate/pull/38)
 * Build certification paths with backtracking and implement CRL distribution points

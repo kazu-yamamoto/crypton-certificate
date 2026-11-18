@@ -2,6 +2,10 @@
 
 ## 1.10.1
 
+The system store contains only the certificates that the OS trusts for
+TLS: the trust settings on macOS, and the Disallowed store and the
+enhanced key usage property on Windows.
+
 * macOS: load TLS anchors according to trust settings
   [#37](https://github.com/kazu-yamamoto/crypton-certificate/pull/37)
 * Fix trust store loading

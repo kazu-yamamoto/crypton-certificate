@@ -2,6 +2,9 @@
 
 ## 1.10.3
 
+MD2 and MD5 signatures are rejected, and certification paths are built
+with backtracking.
+
 * Harden certificate validation
   [#44](https://github.com/kazu-yamamoto/crypton-certificate/pull/44)
 * Accept and encode valid structures in crypton-x509

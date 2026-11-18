@@ -2,6 +2,9 @@
 
 ## 1.10.3
 
+Parsing is stricter: certificates with data after the public key,
+duplicate extensions or trailing data are rejected.
+
 * Omit AlgorithmIdentifier parameters for ECDSA and DSA signatures
   [#32](https://github.com/kazu-yamamoto/crypton-certificate/pull/32)
 * Make certificate parsing stricter
