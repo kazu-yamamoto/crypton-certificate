@@ -4,6 +4,8 @@
 
 * Omit AlgorithmIdentifier parameters for ECDSA and DSA signatures
   [#32](https://github.com/kazu-yamamoto/crypton-certificate/pull/32)
+* Make certificate parsing stricter
+  [#39](https://github.com/kazu-yamamoto/crypton-certificate/pull/39)
 
 ## 1.10.2
 

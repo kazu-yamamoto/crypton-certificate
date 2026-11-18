@@ -32,6 +32,7 @@ import Data.ASN1.Stream (getConstructedEnd)
 import Data.ASN1.Types
 
 import Data.X509.AlgorithmIdentifier
+import Data.X509.Internal (safeDecode)
 import Data.X509.OID (curvesOIDTable, lookupByOID, lookupOID)
 import Data.X509.PublicKey (SerializedPoint (..))
 
@@ -296,10 +297,10 @@ rsaFromASN1
             : End Sequence
             : as
         ) = do
-        asn1 <- mapLeft failure (decodeASN1' BER bytes)
+        asn1 <- mapLeft failure (safeDecode $ decodeASN1' BER bytes)
         fmap (const as) <$> rsaFromASN1 asn1
       where
-        failure = ("rsaFromASN1: " ++) . show
+        failure = ("rsaFromASN1: " ++)
 rsaFromASN1 _ = Left "rsaFromASN1: unexpected format"
 
 dsaFromASN1 :: [ASN1] -> Either String (DSA.PrivateKey, [ASN1])
@@ -323,10 +324,10 @@ dsaFromASN1
             : OctetString bytes
             : End Sequence
             : as
-        ) = case decodeASN1' BER bytes of
+        ) = case safeDecode $ decodeASN1' BER bytes of
         Right [IntVal x] -> pure (DSA.PrivateKey (DSA.Params p g q) x, as)
         Right _ -> Left "DSA.PrivateKey.fromASN1: unexpected format"
-        Left e -> Left $ "DSA.PrivateKey.fromASN1: " ++ show e
+        Left e -> Left $ "DSA.PrivateKey.fromASN1: " ++ e
 dsaFromASN1 _ = Left "DSA.PrivateKey.fromASN1: unexpected format"
 
 ecdsaFromASN1 :: [ASN1] -> Either String (PrivKeyEC, [ASN1])
@@ -380,7 +381,7 @@ ecdsaFromASN1 = go []
                 : rest
             ) = case rest' of
             (OctetString bytes : rest'') -> do
-                asn1 <- mapLeft (failing . show) (decodeASN1' BER bytes)
+                asn1 <- mapLeft failing (safeDecode $ decodeASN1' BER bytes)
                 fmap (const rest'') <$> go (oid ++ acc) asn1
             _ -> Left $ failing "unexpected EC format"
           where
@@ -417,18 +418,18 @@ newcurveFromASN1
                     case getP oid of
                         Just (name, parse) -> do
                             let err s = Left (name ++ ".SecretKey.fromASN1: " ++ s)
-                            case decodeASN1' BER bs of
+                            case safeDecode $ decodeASN1' BER bs of
                                 Right [OctetString key] ->
                                     case parse key of
                                         CryptoPassed s -> Right (s, zs)
                                         CryptoFailed e -> err ("invalid secret key: " ++ show e)
                                 Right _ -> err "unexpected inner format"
-                                Left e -> err (show e)
+                                Left e -> err e
                         Nothing -> case getMLDSA oid of
                             Just (name, parse) ->
-                                case decodeASN1' BER bs of
+                                case safeDecode $ decodeASN1' BER bs of
                                     Right inner -> (\k -> (k, zs)) <$> parse inner
-                                    Left e -> Left (name ++ ".SigningKey.fromASN1: " ++ show e)
+                                    Left e -> Left (name ++ ".SigningKey.fromASN1: " ++ e)
                             Nothing -> Left ("newcurveFromASN1: unexpected OID " ++ show oid)
                 _ -> Left "newcurveFromASN1: unexpected end format"
         | otherwise = Left ("newcurveFromASN1: unexpected version: " ++ show v)

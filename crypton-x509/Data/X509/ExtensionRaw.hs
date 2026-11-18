@@ -17,6 +17,7 @@ import Data.ASN1.BinaryEncoding
 import Data.ASN1.Encoding
 import Data.ASN1.Types
 import qualified Data.ByteString as B
+import Data.List (nub)
 import Data.X509.Internal
 
 -- | An undecoded extension
@@ -55,7 +56,15 @@ instance ASN1Object Extensions where
         asn1Container Sequence (concatMap encodeExt exts) ++ xs
     fromASN1 s = runParseASN1State (Extensions <$> parseExtensions) s
       where
-        parseExtensions = onNextContainerMaybe Sequence (getMany getObject)
+        -- RFC 5280: at most one instance of a particular extension
+        parseExtensions = do
+            mexts <- onNextContainerMaybe Sequence (getMany getObject)
+            case mexts of
+                Just exts
+                    | let oids = map extRawOID exts
+                    , length (nub oids) /= length oids ->
+                        throwParseError "fromASN1: X509.Extensions: duplicate extension"
+                _ -> return mexts
 
 instance ASN1Object ExtensionRaw where
     toASN1 extraw = \xs -> encodeExt extraw ++ xs
