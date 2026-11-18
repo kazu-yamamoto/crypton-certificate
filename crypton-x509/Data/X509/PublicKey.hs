@@ -212,7 +212,10 @@ instance ASN1Object PubKey where
                         ("fromASN1: X509.PubKey " ++ format ++ " bitarray cannot be parsed: " ++ err)
                 Right s -> case f s of
                     Left err -> Left err
-                    Right (r, xsinner) -> Right (r, xsinner ++ xs2)
+                    Right (r, []) -> Right (r, xs2)
+                    -- anything after the key must not leak into the outer stream
+                    Right _ ->
+                        Left ("fromASN1: X509.PubKey " ++ format ++ " bitarray has trailing data")
         toPubKeyRSA = either Left (\(rsaKey, r) -> Right (PubKeyRSA rsaKey, r))
 
         bitArrayToPoint = SerializedPoint . bitArrayGetData
@@ -330,7 +333,10 @@ rsaPubFromASN1
         | otherwise =
             let inner = either strError rsaPubFromASN1 $ safeDecode $ decodeASN1' BER bs
                 strError = Left . ("fromASN1: RSA.PublicKey: " ++)
-             in either Left (\(k, _) -> Right (k, xs)) inner
+             in case inner of
+                    Right (k, []) -> Right (k, xs)
+                    Right _ -> Left "fromASN1: RSA.PublicKey: trailing data"
+                    Left e -> Left e
 rsaPubFromASN1 _ =
     Left "fromASN1: RSA.PublicKey: unexpected format"
 
@@ -343,7 +349,9 @@ toPositive int
   where
     uintOfBytes = foldl (\acc n -> (acc `shiftL` 8) + fromIntegral n) 0
     bytesOfInt :: Integer -> [Word8]
-    bytesOfInt n = if testBit (head nints) 7 then nints else 0xff : nints
+    bytesOfInt n = case nints of
+        h : _ | testBit h 7 -> nints
+        _ -> 0xff : nints
       where
         nints = reverse $ plusOne $ reverse $ map complement $ bytesOfUInt (abs n)
         plusOne [] = [1]

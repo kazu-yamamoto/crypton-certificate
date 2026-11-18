@@ -93,10 +93,6 @@ sig_table =
     , ([1, 2, 840, 10045, 4, 3, 2], SignatureALG HashSHA256 PubKeyALG_EC)
     , ([1, 2, 840, 10045, 4, 3, 3], SignatureALG HashSHA384 PubKeyALG_EC)
     , ([1, 2, 840, 10045, 4, 3, 4], SignatureALG HashSHA512 PubKeyALG_EC)
-    , ([2, 16, 840, 1, 101, 3, 4, 2, 1], SignatureALG HashSHA256 PubKeyALG_RSAPSS)
-    , ([2, 16, 840, 1, 101, 3, 4, 2, 2], SignatureALG HashSHA384 PubKeyALG_RSAPSS)
-    , ([2, 16, 840, 1, 101, 3, 4, 2, 3], SignatureALG HashSHA512 PubKeyALG_RSAPSS)
-    , ([2, 16, 840, 1, 101, 3, 4, 2, 4], SignatureALG HashSHA224 PubKeyALG_RSAPSS)
     , ([2, 16, 840, 1, 101, 3, 4, 3, 1], SignatureALG HashSHA224 PubKeyALG_DSA)
     , ([2, 16, 840, 1, 101, 3, 4, 3, 2], SignatureALG HashSHA256 PubKeyALG_DSA)
     , ([1, 3, 101, 112], SignatureALG_IntrinsicHash PubKeyALG_Ed25519)
@@ -115,6 +111,20 @@ sig_table =
         )
     ]
 
+-- | Hash algorithms in RSASSA-PSS parameters.
+pssHashTable :: [(OID, HashALG)]
+pssHashTable =
+    [ ([2, 16, 840, 1, 101, 3, 4, 2, 1], HashSHA256)
+    , ([2, 16, 840, 1, 101, 3, 4, 2, 2], HashSHA384)
+    , ([2, 16, 840, 1, 101, 3, 4, 2, 3], HashSHA512)
+    , ([2, 16, 840, 1, 101, 3, 4, 2, 4], HashSHA224)
+    ]
+
+pssHashOID :: HashALG -> OID
+pssHashOID h =
+    maybe (error ("unknown PSS hash " ++ show h)) fst $
+        find ((==) h . snd) pssHashTable
+
 oidSig :: OID -> SignatureALG
 oidSig oid = maybe (SignatureALG_Unknown oid) id $ lookup oid sig_table
 
@@ -132,6 +142,11 @@ saltLen HashSHA512 = 64
 saltLen HashSHA224 = 28
 saltLen _ = error "toASN1: X509.SignatureAlg.HashAlg: Unknown hash"
 
+pss :: OID -> [ASN1] -> Either String (SignatureALG, [ASN1])
+pss hash xs = case lookup hash pssHashTable of
+    Just h -> Right (SignatureALG h PubKeyALG_RSAPSS, xs)
+    Nothing -> Left ("fromASN1: X509.SignatureALG: unknown PSS hash " ++ show hash)
+
 instance ASN1Object SignatureALG where
     fromASN1 (Start Sequence : OID oid : Null : End Sequence : xs) =
         case oidSig oid of
@@ -141,35 +156,41 @@ instance ASN1Object SignatureALG where
     fromASN1 (Start Sequence : OID oid : End Sequence : xs) =
         Right (oidSig oid, xs)
     fromASN1
-        ( Start Sequence : OID [1, 2, 840, 113549, 1, 1, 10] : Start Sequence : Start _
+        ( Start Sequence
+                : OID [1, 2, 840, 113549, 1, 1, 10]
+                : Start Sequence
+                : Start (Container Context 0)
                 : Start Sequence
                 : OID hash1
                 : End Sequence
-                : End _
-                : Start _
+                : End (Container Context 0)
+                : Start (Container Context 1)
                 : Start Sequence
                 : OID [1, 2, 840, 113549, 1, 1, 8]
                 : Start Sequence
                 : OID _hash2
                 : End Sequence
                 : End Sequence
-                : End _
-                : Start _
+                : End (Container Context 1)
+                : Start (Container Context 2)
                 : IntVal _iv
-                : End _
+                : End (Container Context 2)
                 : End Sequence
                 : End Sequence
                 : xs
             ) =
-            Right (oidSig hash1, xs)
+            pss hash1 xs
     fromASN1
-        ( Start Sequence : OID [1, 2, 840, 113549, 1, 1, 10] : Start Sequence : Start _
+        ( Start Sequence
+                : OID [1, 2, 840, 113549, 1, 1, 10]
+                : Start Sequence
+                : Start (Container Context 0)
                 : Start Sequence
                 : OID hash1
                 : Null
                 : End Sequence
-                : End _
-                : Start _
+                : End (Container Context 0)
+                : Start (Container Context 1)
                 : Start Sequence
                 : OID [1, 2, 840, 113549, 1, 1, 8]
                 : Start Sequence
@@ -177,32 +198,32 @@ instance ASN1Object SignatureALG where
                 : Null
                 : End Sequence
                 : End Sequence
-                : End _
-                : Start _
+                : End (Container Context 1)
+                : Start (Container Context 2)
                 : IntVal _iv
-                : End _
+                : End (Container Context 2)
                 : End Sequence
                 : End Sequence
                 : xs
             ) =
-            Right (oidSig hash1, xs)
+            pss hash1 xs
     fromASN1 _ =
         Left "fromASN1: X509.SignatureALG: unknown format"
     toASN1 (SignatureALG_Unknown oid) = \xs -> Start Sequence : OID oid : Null : End Sequence : xs
-    toASN1 signatureAlg@(SignatureALG hashAlg PubKeyALG_RSAPSS) = \xs ->
+    toASN1 (SignatureALG hashAlg PubKeyALG_RSAPSS) = \xs ->
         Start Sequence
             : OID [1, 2, 840, 113549, 1, 1, 10]
             : Start Sequence
             : Start (Container Context 0)
             : Start Sequence
-            : OID (sigOID signatureAlg)
+            : OID (pssHashOID hashAlg)
             : End Sequence
             : End (Container Context 0)
             : Start (Container Context 1)
             : Start Sequence
             : OID [1, 2, 840, 113549, 1, 1, 8]
             : Start Sequence
-            : OID (sigOID signatureAlg)
+            : OID (pssHashOID hashAlg)
             : End Sequence
             : End Sequence
             : End (Container Context 1)

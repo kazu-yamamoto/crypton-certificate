@@ -170,34 +170,39 @@ decodeSignedObject b = either Left parseSigned $ safeDecode $ decodeASN1Repr' BE
   where
     -- the following implementation is very inefficient.
     -- uses reverse and containing, move to a better solution eventually
-    parseSigned l = onContainer (fst $ getConstructedEndRepr l) $ \l2 ->
-        let (objRepr, rem1) = getConstructedEndRepr l2
-            (sigAlgSeq, rem2) = getConstructedEndRepr rem1
-            (sigSeq, _) = getConstructedEndRepr rem2
-            obj = onContainer objRepr (either Left Right . fromASN1 . map fst)
-         in case (obj, map fst sigSeq) of
-                (Right (o, []), [BitString signature]) ->
-                    let rawObj = Raw.toByteString $ concatMap snd objRepr
-                     in case fromASN1 $ map fst sigAlgSeq of
-                            Left s -> Left ("signed object error sigalg: " ++ s)
-                            Right (sigAlg, _) ->
-                                let signed =
-                                        Signed
-                                            { signedObject = o
-                                            , signedAlg = sigAlg
-                                            , signedSignature = bitArrayGetData signature
-                                            }
-                                 in Right $
-                                        SignedExact
-                                            { getSigned = signed
-                                            , exactObjectRaw = rawObj
-                                            , encodeSignedObject = b
-                                            }
-                (Right (_, remObj), _) ->
-                    Left $ ("signed object error: remaining stream in object: " ++ show remObj)
-                (Left err, _) -> Left $ ("signed object error: " ++ show err)
-    onContainer ((Start _, _) : l) f =
+    parseSigned l = case getConstructedEndRepr l of
+        (outer, []) -> onSequence outer $ \l2 ->
+            let (objRepr, rem1) = getConstructedEndRepr l2
+                (sigAlgSeq, rem2) = getConstructedEndRepr rem1
+                (sigSeq, rem3) = getConstructedEndRepr rem2
+                obj = onSequence objRepr (fromASN1 . map fst)
+             in case (obj, map fst sigSeq) of
+                    _ | not (null rem3) -> Left "signed object error: trailing data"
+                    (Right (o, []), [BitString signature]) ->
+                        let rawObj = Raw.toByteString $ concatMap snd objRepr
+                         in case fromASN1 $ map fst sigAlgSeq of
+                                Left err -> Left ("signed object error sigalg: " ++ err)
+                                Right (sigAlg, []) ->
+                                    let signed =
+                                            Signed
+                                                { signedObject = o
+                                                , signedAlg = sigAlg
+                                                , signedSignature = bitArrayGetData signature
+                                                }
+                                     in Right $
+                                            SignedExact
+                                                { getSigned = signed
+                                                , exactObjectRaw = rawObj
+                                                , encodeSignedObject = b
+                                                }
+                                Right _ -> Left "signed object error sigalg: trailing data"
+                    (Right (_, []), _) -> Left "signed object error: invalid signature"
+                    (Right (_, remObj), _) ->
+                        Left $ ("signed object error: remaining stream in object: " ++ show remObj)
+                    (Left err, _) -> Left $ ("signed object error: " ++ err)
+        _ -> Left "signed object error: trailing data"
+    onSequence ((Start Sequence, _) : l) f =
         case reverse l of
-            ((End _, _) : l2) -> f $ reverse l2
-            _ -> f []
-    onContainer _ f = f []
+            ((End Sequence, _) : l2) -> f $ reverse l2
+            _ -> Left "signed object error: invalid sequence"
+    onSequence _ _ = Left "signed object error: expecting a sequence"

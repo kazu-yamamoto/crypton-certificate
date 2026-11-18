@@ -188,10 +188,9 @@ instance Arbitrary Extensions where
             <$> oneof
                 [ pure Nothing
                 , Just
-                    <$> ( listOf1 $
-                            oneof
-                                [ extensionEncode <$> arbitrary <*> (arbitrary :: Gen ExtKeyUsage)
-                                ]
+                    -- at most one instance of an extension
+                    <$> ( (: [])
+                            <$> (extensionEncode <$> arbitrary <*> (arbitrary :: Gen ExtKeyUsage))
                         )
                 ]
 
@@ -588,8 +587,128 @@ property_lazy_decode_error =
                     (\_ -> (B.pack [1], SignatureALG HashSHA256 PubKeyALG_RSA, ()))
                     cert
     -- replace the first character of the first UTCTime with a non-ASCII byte
-    (before, after) = B.breakSubstring (B.pack [0x17, 0x0d]) encoded
-    corrupted = before <> B.pack [0x17, 0x0d, 0xff] <> B.drop 3 after
+    (before, rest) = B.breakSubstring (B.pack [0x17, 0x0d]) encoded
+    corrupted = before <> B.pack [0x17, 0x0d, 0xff] <> B.drop 3 rest
+
+-- | A certificate re-encoded after modifying its ASN.1 stream.
+modifiedCertificate :: ([ASN1] -> [ASN1]) -> Either String SignedCertificate
+modifiedCertificate f = decodeSignedCertificate $ encodeASN1' DER $ f asn1
+  where
+    t = timeConvert (Date 2020 January 1) :: DateTime
+    dn = DistinguishedName [(getObjectID DnCommonName, asn1CharacterString UTF8 "x")]
+    cert =
+        Certificate
+            2
+            1
+            (SignatureALG HashSHA256 PubKeyALG_RSA)
+            dn
+            (t, t)
+            dn
+            (PubKeyRSA (RSA.PublicKey 1 0x7f 3))
+            (Extensions Nothing)
+    encoded =
+        encodeSignedObject $
+            fst $
+                objectToSignedExact
+                    (\_ -> (B.pack [1], SignatureALG HashSHA256 PubKeyALG_RSA, ()))
+                    cert
+    asn1 = either (error . show) id $ decodeASN1' DER encoded
+
+isLeft' :: Either a b -> Bool
+isLeft' = either (const True) (const False)
+
+property_signed_strict :: Bool
+property_signed_strict =
+    not (isLeft' (modifiedCertificate id))
+        && isLeft' (modifiedCertificate (++ [IntVal 1]))
+        && isLeft' (modifiedCertificate (\l -> init l ++ [IntVal 1, End Sequence]))
+        && isLeft' (modifiedCertificate (\l -> Start Set : init (drop 1 l) ++ [End Set]))
+
+property_duplicate_extensions :: Bool
+property_duplicate_extensions =
+    isLeft'
+        ( fromASN1 (toASN1 (Extensions (Just [e, e])) [])
+            :: Either String (Extensions, [ASN1])
+        )
+  where
+    e = extensionEncode False (ExtKeyUsage [KeyUsage_digitalSignature])
+
+-- Data after the RSA key in the BIT STRING must not be parsed as
+-- following fields.
+property_rsa_pubkey_trailing :: Bool
+property_rsa_pubkey_trailing =
+    not (isLeft' (decode key)) && isLeft' (decode (key ++ [IntVal 1]))
+  where
+    key = [Start Sequence, IntVal 0xc5, IntVal 3, End Sequence]
+    decode k =
+        fromASN1
+            [ Start Sequence
+            , Start Sequence
+            , OID [1, 2, 840, 113549, 1, 1, 1]
+            , Null
+            , End Sequence
+            , BitString (toBitArray (encodeASN1' DER k) 0)
+            , End Sequence
+            ]
+            :: Either String (PubKey, [ASN1])
+
+property_pss_hash :: Bool
+property_pss_hash =
+    decode (pss [2, 16, 840, 1, 101, 3, 4, 2, 1])
+        == Right (SignatureALG HashSHA256 PubKeyALG_RSAPSS, [])
+        -- sha256WithRSAEncryption is not a hash algorithm
+        && isLeft' (decode (pss [1, 2, 840, 113549, 1, 1, 11]))
+        -- a bare hash algorithm is not a signature algorithm
+        && decode [Start Sequence, OID sha256, End Sequence]
+            == Right (SignatureALG_Unknown sha256, [])
+        && decode (toASN1 (SignatureALG HashSHA384 PubKeyALG_RSAPSS) [])
+            == Right (SignatureALG HashSHA384 PubKeyALG_RSAPSS, [])
+  where
+    sha256 = [2, 16, 840, 1, 101, 3, 4, 2, 1]
+    decode l = fromASN1 l :: Either String (SignatureALG, [ASN1])
+    pss h =
+        [ Start Sequence
+        , OID [1, 2, 840, 113549, 1, 1, 10]
+        , Start Sequence
+        , Start (Container Context 0)
+        , Start Sequence
+        , OID h
+        , End Sequence
+        , End (Container Context 0)
+        , Start (Container Context 1)
+        , Start Sequence
+        , OID [1, 2, 840, 113549, 1, 1, 8]
+        , Start Sequence
+        , OID h
+        , End Sequence
+        , End Sequence
+        , End (Container Context 1)
+        , Start (Container Context 2)
+        , IntVal 32
+        , End (Container Context 2)
+        , End Sequence
+        , End Sequence
+        ]
+
+-- Malformed inner encodings of PKCS#8 keys return Left, not an exception.
+property_privkey_malformed :: Bool
+property_privkey_malformed =
+    all
+        isLeft'
+        [ decode [1, 2, 840, 113549, 1, 1, 1] Null rsaInner
+        , decode [1, 3, 101, 112] none edInner
+        ]
+  where
+    rsaInner = B.pack [0x30, 0x05, 0x02, 0x00, 0x02, 0x01, 0x00]
+    edInner = B.pack [0x17, 0x01, 0xff]
+    none = End Sequence
+    decode oid param inner =
+        fromASN1
+            ( [Start Sequence, IntVal 0, Start Sequence, OID oid]
+                ++ (if param == none then [] else [param])
+                ++ [End Sequence, OctetString inner, End Sequence]
+            )
+            :: Either String (PrivKey, [ASN1])
 
 property_extension_id :: (Show e, Eq e, Extension e) => e -> Bool
 property_extension_id e = case extDecode (extEncode e) of
@@ -641,6 +760,11 @@ main =
                     , testProperty "extensions" property_malformed_extensions
                     , testProperty "SAN skips unknown names" property_san_skips_unknown
                     , testProperty "lazy decode error" property_lazy_decode_error
+                    , testProperty "signed object" property_signed_strict
+                    , testProperty "duplicate extensions" property_duplicate_extensions
+                    , testProperty "RSA key trailing data" property_rsa_pubkey_trailing
+                    , testProperty "PSS hash" property_pss_hash
+                    , testProperty "private key" property_privkey_malformed
                     ]
                 , testGroup
                     "signature-alg-parameters"
