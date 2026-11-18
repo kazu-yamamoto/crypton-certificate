@@ -518,7 +518,7 @@ validatePure validationTime hooks checks store (fqhn, _) (CertificateChain (top 
 
 isSHA1 :: SignatureALG -> Bool
 isSHA1 (SignatureALG HashSHA1 _) = True
-isSHA1 _ = False
+isSHA1 alg = maybe False ((== HashSHA1) . pssHash) $ signatureALGPSSParams alg
 
 -- | Whether BasicConstraints says the certificate is not a CA.
 notCA :: Certificate -> Bool

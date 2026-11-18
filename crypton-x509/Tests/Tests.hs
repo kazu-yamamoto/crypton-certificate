@@ -904,6 +904,48 @@ property_pss_default =
         , End Sequence
         ]
 
+-- Non-default PSS parameters are kept, explicit defaults are normalized,
+-- and trailer fields other than 1 are rejected.
+property_pss_params :: Bool
+property_pss_params =
+    decode (pssAsn1 [hash sha384 0, mgf sha256, salt 0])
+        == Right (SignatureALG_RSAPSS custom, [])
+        && toASN1 (SignatureALG_RSAPSS custom) []
+            == pssAsn1 [hash sha384 0, mgf sha256, salt 0]
+        && rsaPSSSignatureALG custom == SignatureALG_RSAPSS custom
+        && signatureALGPSSParams (SignatureALG_RSAPSS custom) == Just custom
+        && decode (pssAsn1 [hash sha1 0, mgf sha1, salt 20])
+            == Right (SignatureALG HashSHA1 PubKeyALG_RSAPSS, [])
+        && rsaPSSSignatureALG (defaultPSSParams HashSHA256)
+            == SignatureALG HashSHA256 PubKeyALG_RSAPSS
+        && isLeft'
+            ( decode
+                (pssAsn1 [[Start (Container Context 3), IntVal 2, End (Container Context 3)]])
+            )
+  where
+    custom = (defaultPSSParams HashSHA384){pssMGFHash = HashSHA256, pssSaltLength = 0}
+    sha1 = [1, 3, 14, 3, 2, 26]
+    sha256 = [2, 16, 840, 1, 101, 3, 4, 2, 1]
+    sha384 = [2, 16, 840, 1, 101, 3, 4, 2, 2]
+    decode l = fromASN1 l :: Either String (SignatureALG, [ASN1])
+    ctx n l = Start (Container Context n) : l ++ [End (Container Context n)]
+    hash h n = ctx n [Start Sequence, OID h, End Sequence]
+    mgf h =
+        ctx
+            1
+            [ Start Sequence
+            , OID [1, 2, 840, 113549, 1, 1, 8]
+            , Start Sequence
+            , OID h
+            , End Sequence
+            , End Sequence
+            ]
+    salt n = ctx 2 [IntVal n]
+    pssAsn1 fields =
+        [Start Sequence, OID [1, 2, 840, 113549, 1, 1, 10], Start Sequence]
+            ++ concat fields
+            ++ [End Sequence, End Sequence]
+
 -- The usual form (as written by OpenSSL), and points with reasons and a
 -- cRLIssuer, whose name only is kept, or without a name, which are dropped.
 property_crl_dp_der :: Bool
@@ -1013,6 +1055,7 @@ main =
                     , testProperty "validity time" property_validity_time
                     , testProperty "v1 CRL" property_crl_v1
                     , testProperty "PSS default parameters" property_pss_default
+                    , testProperty "PSS parameters" property_pss_params
                     , testProperty "EC private key length" property_ec_privkey_length
                     , testProperty "EC curve name" property_ec_curve_name
                     ]
