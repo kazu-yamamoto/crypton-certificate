@@ -39,6 +39,7 @@ module Data.X509 (
     DnElement (..),
     ASN1CharacterString (..),
     getDnElement,
+    canonicalDistinguishedName,
 
     -- * Certificate Chain
     module Data.X509.CertificateChain,

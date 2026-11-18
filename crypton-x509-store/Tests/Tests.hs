@@ -2,6 +2,7 @@
 module Main (main) where
 
 import Control.Exception (bracket_)
+import Data.ASN1.Types (ASN1StringEncoding (..), asn1CharacterString)
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Char8 as BC
 import Data.Maybe (isJust, isNothing)
@@ -444,6 +445,18 @@ storeTests =
                     createFileLink (dir </> "target.pem") (sub </> "00673b5b.0")
                     store <- readCertificateStore sub
                     assertBool "non-empty store" $ isNothing store
+        , testCase "certificates with the same subject" $ do
+            -- both certificates have CN=Test
+            let certs = readSignedObjectFromMemory (rsaCertificate <> dsaCertificate)
+                store = makeCertificateStore certs
+                subject = certSubjectDN $ getCertificate $ last certs
+            length (findCertificates subject store) @?= 2
+            length (listCertificates store) @?= 2
+            findCertificate subject store @?= Just (last certs)
+        , testCase "subjects are compared in canonical form" $ do
+            let store = makeCertificateStore $ readSignedObjectFromMemory rsaCertificate
+                dn = DistinguishedName [([2, 5, 4, 3], asn1CharacterString Printable " TEST ")]
+            assertBool "not found" $ isJust $ findCertificate dn store
         , testCase "composed empty store is empty" $
             assertBool "not empty" $
                 isEmptyCertificateStore (mempty <> mempty)

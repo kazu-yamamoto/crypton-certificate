@@ -15,14 +15,14 @@ module Data.X509.DistinguishedName (
     -- Distinguished Name Elements
     DnElement (..),
     getDnElement,
+    canonicalDistinguishedName,
 ) where
 
-#if MIN_VERSION_base(4,9,0)
+#if !(MIN_VERSION_base(4,11,0))
 import           Data.Semigroup
-#else
-import           Data.Monoid
 #endif
 import Data.ASN1.Types
+import Data.Char (toLower)
 import Data.X509.Internal
 
 -- | A list of OID and strings.
@@ -53,6 +53,17 @@ instance OIDable DnElement where
 -- | Try to get a specific element in a 'DistinguishedName' structure
 getDnElement :: DnElement -> DistinguishedName -> Maybe ASN1CharacterString
 getDnElement element (DistinguishedName els) = lookup (getObjectID element) els
+
+-- | A form for comparing names (RFC 5280 7.1): string values are
+-- converted to UTF8String, lower-cased and whitespace is folded.  Values
+-- that cannot be decoded are kept.
+canonicalDistinguishedName :: DistinguishedName -> DistinguishedName
+canonicalDistinguishedName (DistinguishedName els) =
+    DistinguishedName [(oid, canon v) | (oid, v) <- els]
+  where
+    canon v = case safeCharacterToString v of
+        Just str -> asn1CharacterString UTF8 $ unwords $ words $ map toLower str
+        Nothing -> v
 
 -- | Only use to encode a DistinguishedName without including it in a
 -- Sequence
