@@ -35,7 +35,10 @@ module Data.X509 (
     module Data.X509.CRL,
 
     -- * Naming
-    DistinguishedName (..),
+    DistinguishedName (DistinguishedName, getDistinguishedElements),
+    RelativeDistinguishedName,
+    getRDNs,
+    fromRDNs,
     DnElement (..),
     ASN1CharacterString (..),
     getDnElement,
@@ -121,7 +124,7 @@ hashDN =
         . DistinguishedNameInner
         . dnLowerUTF8
   where
-    dnLowerUTF8 (DistinguishedName l) = DistinguishedName $ map (second toLowerUTF8) l
+    dnLowerUTF8 = fromRDNs . map (map (second toLowerUTF8)) . getRDNs
     toLowerUTF8 (ASN1CharacterString _ s) = ASN1CharacterString UTF8 (B.map asciiToLower s)
     asciiToLower c
         | c >= w8A && c <= w8Z =
