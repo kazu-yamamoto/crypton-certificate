@@ -1,5 +1,10 @@
 # ChangeLog for crypton-x509-store
 
+## 1.10.1
+
+* Fix trust store loading
+  [#38](https://github.com/kazu-yamamoto/crypton-certificate/pull/38)
+
 ## 1.10.0
 
 * Read ML-DSA private keys

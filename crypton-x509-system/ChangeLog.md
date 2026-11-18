@@ -4,6 +4,8 @@
 
 * macOS: load TLS anchors according to trust settings
   [#37](https://github.com/kazu-yamamoto/crypton-certificate/pull/37)
+* Fix trust store loading
+  [#38](https://github.com/kazu-yamamoto/crypton-certificate/pull/38)
 
 ## 1.10.0
 
