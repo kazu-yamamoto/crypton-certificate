@@ -304,7 +304,13 @@ validatePure validationTime hooks checks store (fqhn, _) (CertificateChain (top 
         doCheckCertificate (getCertificate current)
             -- check if we have a trusted certificate in the store belonging to this issuer.
             |> ( case findCertificate (certIssuerDN cert) store of
-                    Just trustedSignedCert -> checkSignature current trustedSignedCert
+                    Just trustedSignedCert
+                        -- an anchor that is not a CA may only be the certificate itself
+                        | checkCAConstraints checks
+                            && trustedSignedCert /= current
+                            && notCA (getCertificate trustedSignedCert) ->
+                            [NotAnAuthority]
+                        | otherwise -> checkSignature current trustedSignedCert
                     Nothing
                         | isSelfSigned cert -> [SelfSigned] |> checkSignature current current
                         | null chain -> [UnknownCA]
@@ -417,12 +423,16 @@ validatePure validationTime hooks checks store (fqhn, _) (CertificateChain (top 
             , (True, doCriticalExtensionSweep cert)
             ]
     -- check signature of 'signedCert' against the 'signingCert'
+    -- The signature algorithm must also match the signed one in the TBS.
     checkSignature
         :: SignedCertificate -> SignedCertificate -> [FailedReason]
-    checkSignature signedCert signingCert =
-        case verifySignedSignature signedCert (certPubKey $ getCertificate signingCert) of
-            SignaturePass -> []
-            SignatureFailed r -> [InvalidSignature r]
+    checkSignature signedCert signingCert
+        | signedAlg (getSigned signedCert) /= certSignatureAlg (getCertificate signedCert) =
+            [InvalidSignature SignatureInvalid]
+        | otherwise =
+            case verifySignedSignature signedCert (certPubKey $ getCertificate signingCert) of
+                SignaturePass -> []
+                SignatureFailed r -> [InvalidSignature r]
 
     -- Failures to build the chain are reported by 'doCheckChain'.
     doCheckNameConst :: SignedCertificate -> [SignedCertificate] -> [FailedReason]
@@ -444,6 +454,13 @@ validatePure validationTime hooks checks store (fqhn, _) (CertificateChain (top 
             issuer = certIssuerDN cert
             isLeaf = level == 0
             spec = getNameConstSpec cert (isLeaf && checkFQHN checks)
+
+-- | Whether BasicConstraints says the certificate is not a CA.
+notCA :: Certificate -> Bool
+notCA cert = case extensionGetE (certExtensions cert) of
+    Just (Right (ExtBasicConstraints False _)) -> True
+    Just (Left _) -> True
+    _ -> False
 
 isSelfSigned :: Certificate -> Bool
 isSelfSigned cert = certSubjectDN cert == certIssuerDN cert
@@ -596,9 +613,10 @@ validateNames fqhn (commonName, mAltNames) = case parseIPAddress fqhn of
     --
     -- e.g. *.*.server.com will try to litteraly match the '*' subdomain of server.com
     --
-    -- Also '*' is not accepted as a valid wildcard
+    -- Also '*' and a wildcard for a single label such as '*.com' are not
+    -- accepted as valid wildcards
     wildcardMatch l
-        | null l = [InvalidWildcard] -- '*' is always invalid
+        | length l < 2 = [InvalidWildcard]
         | l == drop 1 (splitDot fqhn) = [] -- success: we got a match
         | otherwise = [NameMismatch fqhn]
 

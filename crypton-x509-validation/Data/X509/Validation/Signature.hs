@@ -86,10 +86,16 @@ verifySignature
     -> SignatureVerification
 verifySignature alg pubkey cdata signature
     | not (acceptablePubKey pubkey) = SignatureFailed SignatureInvalid
+    | weakHash alg = SignatureFailed SignatureUnimplemented
     | otherwise =
         -- degenerate keys or encodings must not throw from pure code
         either (const $ SignatureFailed SignatureInvalid) id $
             tryPure (`seq` ()) (verifySignature' alg pubkey cdata signature)
+
+-- | MD2 and MD5 are broken for signatures.
+weakHash :: SignatureALG -> Bool
+weakHash (SignatureALG h _) = h `elem` [HashMD2, HashMD5]
+weakHash _ = False
 
 -- | Reject key parameters that are invalid or too costly to verify with.
 acceptablePubKey :: PubKey -> Bool
@@ -144,14 +150,10 @@ verifySignature' (SignatureALG hashALG pubkeyALG) pubkey cdata signature
 
     dsaToSignature :: ByteString -> Maybe DSA.Signature
     dsaToSignature b =
-        case decodeASN1' BER b of
-            Left _ -> Nothing
-            Right asn1 ->
-                case asn1 of
-                    Start Sequence : IntVal r : IntVal s : End Sequence : _ ->
-                        Just $ DSA.Signature{DSA.sign_r = r, DSA.sign_s = s}
-                    _ ->
-                        Nothing
+        case decodeASN1' DER b of
+            Right [Start Sequence, IntVal r, IntVal s, End Sequence] ->
+                Just $ DSA.Signature{DSA.sign_r = r, DSA.sign_s = s}
+            _ -> Nothing
 
     dsaVerify hsh key b a =
         case dsaToSignature a of
@@ -197,7 +199,7 @@ verifyECDSA hashALG key =
     ecPubKeyCurveName key >>= verifyCurve (pubkeyEC_pub key)
   where
     verifyCurve pub curveName = Just $ \msg sigBS ->
-        case decodeASN1' BER sigBS of
+        case decodeASN1' DER sigBS of
             Left _ -> False
             Right [Start Sequence, IntVal r, IntVal s, End Sequence] ->
                 let curve = ECC.getCurveByName curveName
