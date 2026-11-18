@@ -483,6 +483,16 @@ instance Arbitrary ExtNameConstraints where
 instance Arbitrary ExtSubjectAltName where
     arbitrary = ExtSubjectAltName <$> arbitrary
 
+instance Arbitrary DistributionPoint where
+    arbitrary =
+        oneof
+            [ DistributionPointFullName <$> listOf1 arbitrary
+            , DistributionNameRelative <$> arbitrary
+            ]
+
+instance Arbitrary ExtCrlDistributionPoints where
+    arbitrary = ExtCrlDistributionPoints <$> listOf1 arbitrary
+
 -- NameConstraints with permitted dNSName "example.com" and
 -- excluded iPAddress 10.0.0.0/8, as encoded by OpenSSL.
 property_name_constraints_der :: Bool
@@ -854,6 +864,44 @@ property_pss_default =
         , End Sequence
         ]
 
+-- The usual form (as written by OpenSSL), and points with reasons and a
+-- cRLIssuer, whose name only is kept, or without a name, which are dropped.
+property_crl_dp_der :: Bool
+property_crl_dp_der =
+    extensionDecode (ExtensionRaw [2, 5, 29, 31] False der)
+        == Just
+            (Right (ExtCrlDistributionPoints [DistributionPointFullName [AltNameURI url]]))
+        && extEncodeBs
+            (ExtCrlDistributionPoints [DistributionPointFullName [AltNameURI url]])
+            == der
+        && extDecode
+            ( [Start Sequence]
+                ++ dp (uriName ++ [Other Context 1 (B.pack [6, 0x40])] ++ issuer)
+                ++ dp issuer
+                ++ [End Sequence]
+            )
+            == Right (ExtCrlDistributionPoints [DistributionPointFullName [AltNameURI url]])
+  where
+    url = "http://crl.example.com/ca.crl"
+    der =
+        B.pack
+            ( [0x30, 0x25, 0x30, 0x23, 0xa0, 0x21, 0xa0, 0x1f, 0x86, 0x1d]
+                ++ map (fromIntegral . fromEnum) url
+            )
+    uriName =
+        [ Start (Container Context 0)
+        , Start (Container Context 0)
+        , Other Context 6 (B.pack (map (fromIntegral . fromEnum) url))
+        , End (Container Context 0)
+        , End (Container Context 0)
+        ]
+    issuer =
+        [ Start (Container Context 2)
+        , Other Context 2 (B.pack [0x61])
+        , End (Container Context 2)
+        ]
+    dp xs = [Start Sequence] ++ xs ++ [End Sequence]
+
 property_extension_id :: (Show e, Eq e, Extension e) => e -> Bool
 property_extension_id e = case extDecode (extEncode e) of
     Left err -> error err
@@ -893,6 +941,10 @@ main =
                     , testProperty
                         "subject-alt-name"
                         (property_extension_id :: ExtSubjectAltName -> Bool)
+                    , testProperty
+                        "crl-distribution-points"
+                        (property_extension_id :: ExtCrlDistributionPoints -> Bool)
+                    , testProperty "crl-distribution-points-der" property_crl_dp_der
                     , testProperty
                         "name-constraints"
                         (property_extension_id :: ExtNameConstraints -> Bool)

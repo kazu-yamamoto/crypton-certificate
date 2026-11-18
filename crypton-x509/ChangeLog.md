@@ -8,6 +8,8 @@
   [#39](https://github.com/kazu-yamamoto/crypton-certificate/pull/39)
 * Accept and encode valid structures in crypton-x509
   [#46](https://github.com/kazu-yamamoto/crypton-certificate/pull/46)
+* Build certification paths with backtracking and implement CRL distribution points
+  [#48](https://github.com/kazu-yamamoto/crypton-certificate/pull/48)
 
 ## 1.10.2
 

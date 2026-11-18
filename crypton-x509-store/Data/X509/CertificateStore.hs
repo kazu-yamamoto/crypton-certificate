@@ -10,6 +10,7 @@ module Data.X509.CertificateStore (
 
     -- * Queries
     findCertificate,
+    findCertificates,
     listCertificates,
 ) where
 
@@ -20,7 +21,7 @@ import qualified Data.List as L
 import           Data.Semigroup
 #endif
 import qualified Control.Exception as E
-import Control.Monad (filterM, mplus)
+import Control.Monad (filterM)
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Char8 as BC
 import qualified Data.Map as M
@@ -38,9 +39,11 @@ import qualified System.IO.Error as E
 import System.Posix.Files (getFileStatus, isRegularFile)
 #endif
 
--- | A Collection of certificate or store of certificates.
+-- | A Collection of certificate or store of certificates.  Several
+-- certificates may have the same subject, which is compared in its
+-- canonical form.
 data CertificateStore
-    = CertificateStore (M.Map DistinguishedName SignedCertificate)
+    = CertificateStore (M.Map DistinguishedName [SignedCertificate])
     | CertificateStores [CertificateStore]
 
 isEmptyCertificateStore :: CertificateStore -> Bool
@@ -68,19 +71,31 @@ append (CertificateStores l1) (CertificateStores l2) = CertificateStores (l1 ++ 
 makeCertificateStore :: [SignedCertificate] -> CertificateStore
 makeCertificateStore = CertificateStore . L.foldl' accumulate M.empty
   where
-    accumulate m x509 = M.insert (certSubjectDN $ getCertificate x509) x509 m
+    -- the latest certificate comes first
+    accumulate m x509 = M.insertWith add (subjectKey x509) [x509] m
+    add new old = new ++ filter (`notElem` new) old
+    subjectKey = canonicalDistinguishedName . certSubjectDN . getCertificate
 
--- | Find a certificate using the subject distinguished name
+-- | Find a certificate using the subject distinguished name.  If several
+-- certificates have the subject, the one added last is returned.
 findCertificate
     :: DistinguishedName -> CertificateStore -> Maybe SignedCertificate
-findCertificate dn store = lookupIn store
+findCertificate dn store = case findCertificates dn store of
+    c : _ -> Just c
+    [] -> Nothing
+
+-- | Find all certificates with the subject distinguished name.
+findCertificates
+    :: DistinguishedName -> CertificateStore -> [SignedCertificate]
+findCertificates dn = lookupIn
   where
-    lookupIn (CertificateStore m) = M.lookup dn m
-    lookupIn (CertificateStores l) = foldl mplus Nothing $ map lookupIn l
+    key = canonicalDistinguishedName dn
+    lookupIn (CertificateStore m) = M.findWithDefault [] key m
+    lookupIn (CertificateStores l) = concatMap lookupIn l
 
 -- | List all certificates in a store
 listCertificates :: CertificateStore -> [SignedCertificate]
-listCertificates (CertificateStore store) = map snd $ M.toList store
+listCertificates (CertificateStore store) = concat $ M.elems store
 listCertificates (CertificateStores l) = concatMap listCertificates l
 
 -- | Create certificate store by reading certificates from file or directory

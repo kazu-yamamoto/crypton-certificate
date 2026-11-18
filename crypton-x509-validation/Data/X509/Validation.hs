@@ -38,7 +38,9 @@ module Data.X509.Validation (
     module Data.X509.Validation.Signature,
 ) where
 
+import Control.Applicative ((<|>))
 import Control.Monad (when)
+import Control.Monad.State.Strict (State, evalState, get, put)
 import Data.ASN1.Types
 import Data.Bits
 import Data.ByteString (ByteString, unpack)
@@ -276,8 +278,10 @@ validatePure _ _ _ _ _ (CertificateChain []) = [EmptyChain]
 validatePure validationTime hooks checks store (fqhn, _) (CertificateChain (top : rchain)) =
     hookFilterReason
         hooks
-        (doLeafChecks |> doCheckChain 0 top rchain |> doCheckNameConst top rchain)
+        (doLeafChecks |> chainFailures |> maybe [] doCheckNameConst mpath)
   where
+    (chainFailures, mpath) = evalState (doCheckChain 0 top rchain) maxSignatureChecks
+
     isExhaustive :: Bool
     isExhaustive = checkExhaustive checks
 
@@ -292,56 +296,93 @@ validatePure validationTime hooks checks store (fqhn, _) (CertificateChain (top 
       where
         topCert = getCertificate top
 
+    -- Failures of the first path that succeeds, or else of the first
+    -- path tried, with the certificates from the current one to the trust
+    -- anchor if the path reaches one.
     doCheckChain
-        :: Int -> SignedCertificate -> [SignedCertificate] -> [FailedReason]
+        :: Int
+        -> SignedCertificate
+        -> [SignedCertificate]
+        -> State Int ([FailedReason], Maybe [SignedCertificate])
     doCheckChain level current chain
-        | level > maxChainDepth = [AuthorityTooDeep]
-        | otherwise = doCheckChain' level current chain
-
-    doCheckChain'
-        :: Int -> SignedCertificate -> [SignedCertificate] -> [FailedReason]
-    doCheckChain' level current chain =
-        doCheckCertificate (getCertificate current)
-            -- check if we have a trusted certificate in the store belonging to this issuer.
-            |> ( case findCertificate (certIssuerDN cert) store of
-                    Just trustedSignedCert
-                        -- an anchor that is not a CA may only be the certificate itself
-                        | checkCAConstraints checks
-                            && trustedSignedCert /= current
-                            && notCA (getCertificate trustedSignedCert) ->
-                            [NotAnAuthority]
-                        | otherwise -> checkSignature current trustedSignedCert
-                    Nothing
-                        | isSelfSigned cert -> [SelfSigned] |> checkSignature current current
-                        | null chain -> [UnknownCA]
-                        | otherwise ->
-                            case findIssuer (certIssuerDN cert) chain of
-                                Nothing -> [UnknownCA]
-                                Just (issuer, remaining) ->
-                                    checkCA level (getCertificate issuer)
-                                        |> checkSignature current issuer
-                                        |> doCheckChain (level + 1) issuer remaining
-               )
+        | level > maxChainDepth = return ([AuthorityTooDeep], Nothing)
+        | otherwise =
+            fmap (fmap (current :))
+                <$> (doCheckCertificate cert `andThen` issuerChecks)
       where
-        cert :: Certificate
         cert = getCertificate current
-    -- in a strict ordering check the next certificate has to be the issuer.
-    -- otherwise we dynamically reorder the chain to have the necessary certificate
-    findIssuer
+        issuerDN = certIssuerDN cert
+        anchors = findCertificates issuerDN store
+        issuerChecks
+            | null anchors && isSelfSigned cert = do
+                r <- checkSignatureM current current
+                return ([SelfSigned] |> r, Nothing)
+            | otherwise =
+                firstSuccess $
+                    map anchorCheck anchors
+                        ++ [chainCheck i r | (i, r) <- findIssuers issuerDN chain]
+        anchorCheck anchor
+            -- an anchor that is not a CA may only be the certificate itself
+            | checkCAConstraints checks
+                && anchor /= current
+                && notCA (getCertificate anchor) =
+                return ([NotAnAuthority], Nothing)
+            | otherwise = do
+                r <- checkSignatureM current anchor
+                return (r, Just [anchor])
+        chainCheck issuer remaining = do
+            r <- checkSignatureM current issuer
+            (checkCA level (getCertificate issuer) |> r)
+                `andThen` doCheckChain (level + 1) issuer remaining
+
+    -- Runs the next step unless the failures stop the validation.
+    andThen
+        :: [FailedReason]
+        -> State Int ([FailedReason], Maybe p)
+        -> State Int ([FailedReason], Maybe p)
+    andThen fs next
+        | null fs || isExhaustive = (\(fs', p) -> (fs ++ fs', p)) <$> next
+        | otherwise = return (fs, Nothing)
+
+    firstSuccess
+        :: [State Int ([FailedReason], Maybe p)]
+        -> State Int ([FailedReason], Maybe p)
+    firstSuccess = go Nothing
+      where
+        go failed [] = return $ fromMaybe ([UnknownCA], Nothing) failed
+        go failed (m : ms) = do
+            r@(fs, _) <- m
+            if null fs then return r else go (failed <|> Just r) ms
+
+    -- A signature check spends the budget, which bounds path building.
+    checkSignatureM
+        :: SignedCertificate -> SignedCertificate -> State Int [FailedReason]
+    checkSignatureM signedCert signingCert = do
+        budget <- get
+        if budget <= 0
+            then return [UnknownCA]
+            else do
+                put (budget - 1)
+                return $ checkSignature signedCert signingCert
+
+    -- Issuer candidates in the chain with the remaining certificates.  In
+    -- a strict ordering check the next certificate has to be the issuer.
+    findIssuers
         :: DistinguishedName
         -> [SignedCertificate]
-        -> Maybe (SignedCertificate, [SignedCertificate])
-    findIssuer issuerDN chain
-        | checkStrictOrdering checks =
-            case chain of
-                [] -> error "not possible"
-                (c : cs)
-                    | matchSubjectIdentifier issuerDN (getCertificate c) -> Just (c, cs)
-                    | otherwise -> Nothing
+        -> [(SignedCertificate, [SignedCertificate])]
+    findIssuers issuerDN chain
+        | checkStrictOrdering checks = case chain of
+            c : cs | matches c -> [(c, cs)]
+            _ -> []
         | otherwise =
-            case break (matchSubjectIdentifier issuerDN . getCertificate) chain of
-                (before, x : after) -> Just (x, before ++ after)
-                _ -> Nothing
+            [ (c, before ++ after)
+            | (before, c : after) <- zip (inits chain) (tails chain)
+            , matches c
+            ]
+      where
+        matches = matchSubjectIdentifier issuerDN . getCertificate
+
     matchSubjectIdentifier :: DistinguishedName -> Certificate -> Bool
     matchSubjectIdentifier = hookMatchSubjectIssuer hooks
 
@@ -434,26 +475,17 @@ validatePure validationTime hooks checks store (fqhn, _) (CertificateChain (top 
                 SignaturePass -> []
                 SignatureFailed r -> [InvalidSignature r]
 
-    -- Failures to build the chain are reported by 'doCheckChain'.
-    doCheckNameConst :: SignedCertificate -> [SignedCertificate] -> [FailedReason]
-    doCheckNameConst current0 chain0 = case loop (0 :: Int) current0 chain0 [] of
-        Left errs -> errs
-        Right ts -> checkNameConstraints ts
+    -- The path runs from the leaf to the trust anchor.
+    doCheckNameConst :: [SignedCertificate] -> [FailedReason]
+    doCheckNameConst path = case reverse path of
+        anchor : rest ->
+            checkNameConstraints $
+                getNameConstSpec (getCertificate anchor) False
+                    : zipWith spec [length rest - 1, length rest - 2 ..] rest
+        [] -> []
       where
-        loop level current chain acc
-            | level > maxChainDepth = Left []
-            | otherwise = case findCertificate issuer store of
-                Just anchor -> Right $ getNameConstSpec (getCertificate anchor) False : spec : acc
-                Nothing
-                    | null chain -> Left []
-                    | otherwise -> case findIssuer issuer chain of
-                        Nothing -> Left []
-                        Just (issuer', remaining) -> loop (level + 1) issuer' remaining (spec : acc)
-          where
-            cert = getCertificate current
-            issuer = certIssuerDN cert
-            isLeaf = level == 0
-            spec = getNameConstSpec cert (isLeaf && checkFQHN checks)
+        -- the level counts from the leaf
+        spec level c = getNameConstSpec (getCertificate c) (level == 0 && checkFQHN checks)
 
 -- | Whether BasicConstraints says the certificate is not a CA.
 notCA :: Certificate -> Bool
@@ -468,6 +500,10 @@ isSelfSigned cert = certSubjectDN cert == certIssuerDN cert
 -- | The maximum number of CA certificates followed from the leaf.
 maxChainDepth :: Int
 maxChainDepth = 20
+
+-- | The maximum number of signatures checked while building paths.
+maxSignatureChecks :: Int
+maxSignatureChecks = 100
 
 data NameConstSpec = NameConstSpec
     { ncNames :: Either String [AltName]
@@ -598,7 +634,7 @@ validateNames fqhn (commonName, mAltNames) = case parseIPAddress fqhn of
     matchDomain name = case splitDot name of
         l
             | any (== "") l -> [InvalidName name]
-            | head l == "*" -> wildcardMatch (drop 1 l)
+            | take 1 l == ["*"] -> wildcardMatch (drop 1 l)
             | l == splitDot fqhn -> [] -- success: we got a match
             | otherwise -> [NameMismatch fqhn]
 
@@ -628,8 +664,11 @@ validateNames fqhn (commonName, mAltNames) = case parseIPAddress fqhn of
 
 -- | return true if the 'subject' certificate's issuer match
 -- the 'issuer' certificate's subject
+-- | Names are compared in their canonical form (RFC 5280 7.1).
 matchSI :: DistinguishedName -> Certificate -> Bool
-matchSI issuerDN issuer = certSubjectDN issuer == issuerDN
+matchSI issuerDN issuer =
+    canonicalDistinguishedName (certSubjectDN issuer)
+        == canonicalDistinguishedName issuerDN
 
 exhaustive :: Bool -> [FailedReason] -> [FailedReason] -> [FailedReason]
 exhaustive isExhaustive l1 l2

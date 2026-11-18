@@ -938,6 +938,108 @@ testWeakHash = testCase "MD5 signature" $ do
   where
     bc = ExtBasicConstraints True Nothing
 
+-- | A root re-keyed under the same name: both are kept in the store.
+testSameNameRoots :: IO (RData pub priv) -> TestTree
+testSameNameRoots res = testWithRes res "same-name roots" $ \rd -> do
+    old <- mkCertificate 2 60 (mkDn "Same Root") (present rd) [caBC] Self (keys1 rd)
+    new <- mkCertificate 2 61 (mkDn "Same Root") (present rd) [caBC] Self (keys2 rd)
+    leaf <-
+        mkCertificate 2 62 (mkDn "leaf") (present rd) [exampleSAN] (CA old) (keys3 rd)
+    actual <- validateExample (mkStore [old, new]) [pairSignedCert leaf]
+    actual @?= []
+
+-- | The first intermediate with the issuer name is not the issuer.
+testBacktracking :: IO (RData pub priv) -> TestTree
+testBacktracking res = testWithRes res "backtracking" $ \rd -> do
+    other <-
+        mkCertificate 2 70 (mkDn "Other Root") (present rd) [caBC] Self (keys1 rd)
+    wrong <-
+        mkCertificate 2 71 (mkDn "Same CA") (present rd) [caBC] (CA other) (keys2 rd)
+    right <-
+        mkCertificate
+            2
+            72
+            (mkDn "Same CA")
+            (present rd)
+            [caBC]
+            (CA (root rd))
+            (keys3 rd)
+    leaf <-
+        mkCertificate 2 73 (mkDn "leaf") (present rd) [exampleSAN] (CA right) (keys1 rd)
+    actual <-
+        validateExample
+            (mkStore [root rd, other])
+            (map pairSignedCert [leaf, wrong, right])
+    actual @?= []
+
+-- | Many certificates with the same names do not make path building
+-- exponential.
+testPathBudget :: IO (RData pub priv) -> TestTree
+testPathBudget res =
+    localOption (mkTimeout 10000000) $
+        testWithRes res "path budget" $ \rd -> do
+            a0 <- mkCertificate 2 80 (mkDn "Loop A") (present rd) [caBC] Self (keys1 rd)
+            let mk dn i issuer = mkCertificate 2 i (mkDn dn) (present rd) [caBC] (CA issuer) (keys1 rd)
+            bs@(b1 : _) <- mapM (mk "Loop B" 90 . const a0) [1 .. 6 :: Int]
+            as@(a1 : _) <- mapM (\i -> mk "Loop A" (100 + i) b1) [1 .. 6]
+            leaf <-
+                mkCertificate
+                    2
+                    99
+                    (mkDn "leaf")
+                    (present rd)
+                    [exampleSAN]
+                    (CA a1)
+                    (keys2 rd)
+            -- "Loop A" issued by "Loop B" and vice versa, all with one key
+            let chain = leaf : concat (zipWith (\x y -> [x, y]) as bs)
+            actual <- validateExample (rootStore rd) (map pairSignedCert chain)
+            assertBool "unexpected success" $ not (null actual)
+
+-- | Issuer names are compared in canonical form.
+testCanonicalIssuer :: TestTree
+testCanonicalIssuer = testCase "canonical issuer name" $ do
+    validity <- currentValidity
+    let alg = AlgEC ECC.SEC_p256r1 hashSHA256
+    rootPair <-
+        generateKeys alg
+            >>= mkCA
+                1
+                "Case Root"
+                validity
+                (Just $ ExtBasicConstraints True Nothing)
+                Nothing
+                Self
+    let rootCert = signedObject $ getSigned $ pairSignedCert rootPair
+        sigAlg = SignatureALG HashSHA256 PubKeyALG_EC
+        cert =
+            Certificate
+                { certVersion = 2
+                , certSerial = 2
+                , certSignatureAlg = sigAlg
+                , certIssuerDN =
+                    DistinguishedName
+                        [(getObjectID DnCommonName, asn1CharacterString Printable "CASE  root")]
+                , certValidity = validity
+                , certSubjectDN = mkDn "leaf"
+                , certPubKey = certPubKey rootCert
+                , certExtensions = Extensions (Just [exampleSAN])
+                }
+        sign raw = do
+            sig <- ECDSA.sign (pairKey rootPair) SHA256 raw
+            let der =
+                    encodeASN1'
+                        DER
+                        [ Start Sequence
+                        , IntVal (ECDSA.sign_r sig)
+                        , IntVal (ECDSA.sign_s sig)
+                        , End Sequence
+                        ]
+            return (der, sigAlg)
+    leaf <- objectToSignedExactF sign cert
+    actual <- validateExample (mkStore [rootPair]) [leaf]
+    actual @?= []
+
 -- | Regression tests that do not depend on the signature algorithm.
 treeRegression :: TestTree
 treeRegression = withResource (initData AlgEd25519) freeData $ \res ->
@@ -948,6 +1050,13 @@ treeRegression = withResource (initData AlgEd25519) freeData $ \res ->
             [ testNonCAAnchor res
             , testSignatureAlgMismatch
             , testWeakHash
+            ]
+        , testGroup
+            "path building"
+            [ testSameNameRoots res
+            , testBacktracking res
+            , testPathBudget res
+            , testCanonicalIssuer
             ]
         , testGroup
             "name-constraints"
