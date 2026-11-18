@@ -9,6 +9,14 @@
 module Data.X509.PublicKey (
     PubKey (..),
     PubKeyEC (..),
+    PubKeyDH,
+    dhPublicKey,
+    pubkeyDH_p,
+    pubkeyDH_g,
+    pubkeyDH_q,
+    pubkeyDH_j,
+    pubkeyDH_validation,
+    pubkeyDH_y,
     SerializedPoint (..),
     pubkeyToAlg,
 ) where
@@ -65,14 +73,33 @@ data PubKeyEC
         }
     deriving (Show, Eq)
 
+-- | X9.42 Diffie-Hellman public key (RFC 3279 2.3.3).  The constructor is
+-- hidden; use 'dhPublicKey' and record update syntax.
+data PubKeyDH = PubKeyDH_
+    { pubkeyDH_p :: Integer
+    , pubkeyDH_g :: Integer
+    , pubkeyDH_q :: Integer
+    , pubkeyDH_j :: Maybe Integer
+    , pubkeyDH_validation :: Maybe (BitArray, Integer)
+    -- ^ seed and pgenCounter
+    , pubkeyDH_y :: Integer
+    -- ^ the public value
+    }
+    deriving (Show, Eq)
+
+-- | A DH public key from p, g, q and the public value, without j and
+-- validation parameters.
+dhPublicKey :: Integer -> Integer -> Integer -> Integer -> PubKeyDH
+dhPublicKey p g q y = PubKeyDH_ p g q Nothing Nothing y
+
 -- | Public key types known and used in X.509
 data PubKey
     = -- | RSA public key
       PubKeyRSA RSA.PublicKey
     | -- | DSA public key
       PubKeyDSA DSA.PublicKey
-    | -- | DH format with (p,g,q,j,(seed,pgenCounter))
-      PubKeyDH (Integer, Integer, Integer, Maybe Integer, ([Word8], Integer))
+    | -- | X9.42 DH public key
+      PubKeyDH PubKeyDH
     | -- | EC public key
       PubKeyEC PubKeyEC
     | -- | X25519 public key
@@ -132,6 +159,23 @@ instance ASN1Object PubKey where
                                 _ -> Left "fromASN1: X509.PubKey: unknown DSA format"
                             )
                 _ -> Left "fromASN1: X509.PubKey: unknown DSA format"
+        | pkalg == getObjectID PubKeyALG_DH =
+            case xs of
+                Start Sequence : IntVal p : IntVal g : IntVal q : rest ->
+                    let (j, rest1) = case rest of
+                            IntVal j' : r -> (Just j', r)
+                            r -> (Nothing, r)
+                        (v, rest2) = case rest1 of
+                            Start Sequence : BitString seed : IntVal c : End Sequence : r ->
+                                (Just (seed, c), r)
+                            r -> (Nothing, r)
+                     in case rest2 of
+                            End Sequence : End Sequence : BitString bits : End Sequence : xs2 ->
+                                decodeASN1Err "DH" bits xs2 $ \l -> case l of
+                                    [IntVal y] -> Right (PubKeyDH (PubKeyDH_ p g q j v y), [])
+                                    _ -> Left "fromASN1: X509.PubKey: unknown DH format"
+                            _ -> Left "fromASN1: X509.PubKey: unknown DH format"
+                _ -> Left "fromASN1: X509.PubKey: unknown DH format"
         | pkalg == getObjectID PubKeyALG_EC =
             case xs of
                 OID curveOid : End Sequence : BitString bits : End Sequence : xs2 ->
@@ -321,7 +365,18 @@ encodePK key = asn1Container Sequence (encodeInner key)
         asn1Container Sequence [pkalg] ++ [BitString $ toBitArray (convert pubkey) 0]
     encodeInner (PubKeyMLDSA87 pubkey) =
         asn1Container Sequence [pkalg] ++ [BitString $ toBitArray (convert pubkey) 0]
-    encodeInner (PubKeyDH _) = error "encodeInner: unimplemented public key DH"
+    encodeInner (PubKeyDH k) =
+        asn1Container Sequence ([pkalg] ++ params) ++ [BitString $ toBitArray bits 0]
+      where
+        params =
+            asn1Container Sequence $
+                [IntVal (pubkeyDH_p k), IntVal (pubkeyDH_g k), IntVal (pubkeyDH_q k)]
+                    ++ maybe [] (\j -> [IntVal j]) (pubkeyDH_j k)
+                    ++ maybe
+                        []
+                        (\(seed, c) -> asn1Container Sequence [BitString seed, IntVal c])
+                        (pubkeyDH_validation k)
+        bits = encodeASN1' DER [IntVal $ pubkeyDH_y k]
     encodeInner (PubKeyUnknown _ l) =
         asn1Container Sequence [pkalg, Null] ++ [BitString $ toBitArray l 0]
 
