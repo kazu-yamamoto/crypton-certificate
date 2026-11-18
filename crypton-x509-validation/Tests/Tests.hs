@@ -8,6 +8,7 @@ import Crypto.Hash.Algorithms
 import qualified Crypto.PubKey.DSA as DSA
 import qualified Crypto.PubKey.ECC.ECDSA as ECDSA
 import qualified Crypto.PubKey.ECC.Types as ECC
+import Crypto.PubKey.MaskGenFunction (mgf1)
 import qualified Crypto.PubKey.RSA as RSA
 import qualified Crypto.PubKey.RSA.PSS as PSS
 
@@ -833,6 +834,31 @@ testBadKeys =
                 @?= SignatureFailed SignatureInvalid
         ]
 
+-- | RSA-PSS signatures are verified with their own parameters.
+testPSSParams :: TestTree
+testPSSParams = testCase "RSA-PSS parameters" $ do
+    (pub, priv) <- RSA.generate 128 3
+    let msg = BS.pack [1, 2, 3]
+        params :: PSS.PSSParams SHA384 BS.ByteString BS.ByteString
+        params =
+            PSS.PSSParams
+                { PSS.pssHash = SHA384
+                , PSS.pssMaskGenAlg = mgf1 SHA256
+                , PSS.pssSaltLength = 0
+                , PSS.pssTrailerField = 0xbc
+                }
+        alg =
+            rsaPSSSignatureALG $
+                (defaultPSSParams HashSHA384){pssMGFHash = HashSHA256, pssSaltLength = 0}
+    sig <- either (error . show) id <$> PSS.signSafer params priv msg
+    verifySignature alg (PubKeyRSA pub) msg sig @?= SignaturePass
+    verifySignature
+        (SignatureALG HashSHA384 PubKeyALG_RSAPSS)
+        (PubKeyRSA pub)
+        msg
+        sig
+        @?= SignatureFailed SignatureInvalid
+
 -- | Validity period around the current date.
 currentValidity :: IO (DateTime, DateTime)
 currentValidity = do
@@ -1373,6 +1399,7 @@ treeRegression = withResource (initData AlgEd25519) freeData $ \res ->
             , testLongChain res "too long" 25 False
             ]
         , testBadKeys
+        , testPSSParams
         ]
   where
     dns = AltNameDNS

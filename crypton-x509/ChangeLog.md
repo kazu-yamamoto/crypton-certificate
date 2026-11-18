@@ -1,5 +1,10 @@
 # ChangeLog for crypton-x509
 
+## 1.11.0
+
+* Keep RSA-PSS parameters
+  [#53](https://github.com/kazu-yamamoto/crypton-certificate/pull/53)
+
 ## 1.10.3
 
 Parsing is stricter: certificates with data after the public key,

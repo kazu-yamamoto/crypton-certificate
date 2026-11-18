@@ -1,6 +1,6 @@
 cabal-version:      >=1.10
 name:               crypton-x509
-version:            1.10.3
+version:            1.11.0
 license:            BSD3
 license-file:       LICENSE
 copyright:          Vincent Hanquez <vincent@snarc.org>

@@ -1,3 +1,5 @@
+{-# LANGUAGE RankNTypes #-}
+
 -- |
 -- Module      : Data.X509.Validation.Signature
 -- License     : BSD-style
@@ -22,6 +24,7 @@ import qualified Crypto.PubKey.ECC.Types as ECC
 import qualified Crypto.PubKey.Ed25519 as Ed25519
 import qualified Crypto.PubKey.Ed448 as Ed448
 import qualified Crypto.PubKey.MLDSA as MLDSA
+import Crypto.PubKey.MaskGenFunction (mgf1)
 import qualified Crypto.PubKey.RSA as RSA
 import qualified Crypto.PubKey.RSA.PKCS15 as RSA
 import qualified Crypto.PubKey.RSA.PSS as PSS
@@ -116,21 +119,10 @@ acceptablePubKey _ = True
 verifySignature'
     :: SignatureALG -> PubKey -> ByteString -> ByteString -> SignatureVerification
 verifySignature' (SignatureALG_Unknown _) _ _ _ = SignatureFailed SignatureUnimplemented
-verifySignature' (SignatureALG hashALG PubKeyALG_RSAPSS) pubkey cdata signature = case verifyF pubkey of
-    Nothing -> SignatureFailed SignatureUnimplemented
-    Just f ->
-        if f cdata signature
-            then SignaturePass
-            else SignatureFailed SignatureInvalid
-  where
-    verifyF (PubKeyRSA key)
-        | hashALG == HashSHA256 = Just $ PSS.verify (PSS.defaultPSSParams SHA256) key
-        | hashALG == HashSHA384 = Just $ PSS.verify (PSS.defaultPSSParams SHA384) key
-        | hashALG == HashSHA512 = Just $ PSS.verify (PSS.defaultPSSParams SHA512) key
-        | hashALG == HashSHA224 = Just $ PSS.verify (PSS.defaultPSSParams SHA224) key
-        | hashALG == HashSHA1 = Just $ PSS.verify (PSS.defaultPSSParams SHA1) key
-        | otherwise = Nothing
-    verifyF _ = Nothing
+verifySignature' (SignatureALG hashALG PubKeyALG_RSAPSS) pubkey cdata signature =
+    verifyPSS (defaultPSSParams hashALG) pubkey cdata signature
+verifySignature' (SignatureALG_RSAPSS params) pubkey cdata signature =
+    verifyPSS params pubkey cdata signature
 verifySignature' (SignatureALG hashALG pubkeyALG) pubkey cdata signature
     | pubkeyToAlg pubkey == pubkeyALG = case verifyF pubkey of
         Nothing -> SignatureFailed SignatureUnimplemented
@@ -195,6 +187,33 @@ verifySignature' (SignatureALG_IntrinsicHash pubkeyALG) pubkey cdata signature
                 | MLDSA.verify key MLDSA.emptyContext cdata sig -> SignaturePass
                 | otherwise -> SignatureFailed SignatureInvalid
             CryptoFailed _ -> SignatureFailed SignatureInvalid
+
+verifyPSS
+    :: PSSParams -> PubKey -> ByteString -> ByteString -> SignatureVerification
+verifyPSS params (PubKeyRSA key) cdata signature =
+    case withPSSHash (pssHash params) $ \h -> withPSSHash (pssMGFHash params) $ \m ->
+        Just (PSS.verify (pssParams h m) key cdata signature) of
+        Nothing -> SignatureFailed SignatureUnimplemented
+        Just True -> SignaturePass
+        Just False -> SignatureFailed SignatureInvalid
+  where
+    pssParams h m =
+        PSS.PSSParams
+            { PSS.pssHash = h
+            , PSS.pssMaskGenAlg = mgf1 m
+            , PSS.pssSaltLength = pssSaltLength params
+            , PSS.pssTrailerField = 0xbc
+            }
+verifyPSS _ _ _ _ = SignatureFailed SignaturePubkeyMismatch
+
+withPSSHash
+    :: HashALG -> (forall a. HashAlgorithm a => a -> Maybe r) -> Maybe r
+withPSSHash HashSHA1 f = f SHA1
+withPSSHash HashSHA224 f = f SHA224
+withPSSHash HashSHA256 f = f SHA256
+withPSSHash HashSHA384 f = f SHA384
+withPSSHash HashSHA512 f = f SHA512
+withPSSHash _ _ = Nothing
 
 verifyECDSA :: HashALG -> PubKeyEC -> Maybe (ByteString -> ByteString -> Bool)
 verifyECDSA hashALG key =

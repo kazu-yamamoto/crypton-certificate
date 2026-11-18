@@ -8,6 +8,13 @@ module Data.X509.AlgorithmIdentifier (
     HashALG (..),
     PubKeyALG (..),
     SignatureALG (..),
+    PSSParams,
+    pssHash,
+    pssMGFHash,
+    pssSaltLength,
+    defaultPSSParams,
+    rsaPSSSignatureALG,
+    signatureALGPSSParams,
 ) where
 
 import Data.ASN1.Types
@@ -61,7 +68,52 @@ data SignatureALG
     = SignatureALG HashALG PubKeyALG
     | SignatureALG_IntrinsicHash PubKeyALG
     | SignatureALG_Unknown OID
+    | -- | RSASSA-PSS with parameters other than 'defaultPSSParams'.  With the
+      -- default parameters, @SignatureALG h PubKeyALG_RSAPSS@ is used instead;
+      -- 'rsaPSSSignatureALG' picks the right form.
+      SignatureALG_RSAPSS PSSParams
     deriving (Show, Eq)
+
+-- | RSASSA-PSS parameters (RFC 4055).  Only MGF1 and the trailer field 1
+-- are supported.  The constructor is hidden; use 'defaultPSSParams' and
+-- record update syntax.
+data PSSParams = PSSParams
+    { pssHash :: HashALG
+    -- ^ The message hash
+    , pssMGFHash :: HashALG
+    -- ^ The hash used by MGF1
+    , pssSaltLength :: Int
+    -- ^ The salt length in bytes
+    }
+    deriving (Show, Eq)
+
+-- | The hash for both the message and MGF1, and the salt length equal to
+-- the hash length.
+defaultPSSParams :: HashALG -> PSSParams
+defaultPSSParams h = PSSParams h h (hashLength h)
+
+hashLength :: HashALG -> Int
+hashLength HashMD2 = 16
+hashLength HashMD5 = 16
+hashLength HashSHA1 = 20
+hashLength HashSHA224 = 28
+hashLength HashSHA256 = 32
+hashLength HashSHA384 = 48
+hashLength HashSHA512 = 64
+
+-- | The RSASSA-PSS signature algorithm with the given parameters.
+rsaPSSSignatureALG :: PSSParams -> SignatureALG
+rsaPSSSignatureALG p
+    | p == defaultPSSParams h = SignatureALG h PubKeyALG_RSAPSS
+    | otherwise = SignatureALG_RSAPSS p
+  where
+    h = pssHash p
+
+-- | The RSASSA-PSS parameters of a signature algorithm, if any.
+signatureALGPSSParams :: SignatureALG -> Maybe PSSParams
+signatureALGPSSParams (SignatureALG h PubKeyALG_RSAPSS) = Just (defaultPSSParams h)
+signatureALGPSSParams (SignatureALG_RSAPSS p) = Just p
+signatureALGPSSParams _ = Nothing
 
 instance OIDable PubKeyALG where
     getObjectID PubKeyALG_RSA = [1, 2, 840, 113549, 1, 1, 1]
@@ -114,7 +166,8 @@ sig_table =
 -- | Hash algorithms in RSASSA-PSS parameters.
 pssHashTable :: [(OID, HashALG)]
 pssHashTable =
-    [ ([2, 16, 840, 1, 101, 3, 4, 2, 1], HashSHA256)
+    [ ([1, 3, 14, 3, 2, 26], HashSHA1)
+    , ([2, 16, 840, 1, 101, 3, 4, 2, 1], HashSHA256)
     , ([2, 16, 840, 1, 101, 3, 4, 2, 2], HashSHA384)
     , ([2, 16, 840, 1, 101, 3, 4, 2, 3], HashSHA512)
     , ([2, 16, 840, 1, 101, 3, 4, 2, 4], HashSHA224)
@@ -134,18 +187,67 @@ sigOID sig =
     maybe (error ("unknown OID for " ++ show sig)) fst $
         find ((==) sig . snd) sig_table
 
--- | PSS salt length. Always assume ``-sigopt rsa_pss_saltlen:-1``
-saltLen :: HashALG -> Integer
-saltLen HashSHA256 = 32
-saltLen HashSHA384 = 48
-saltLen HashSHA512 = 64
-saltLen HashSHA224 = 28
-saltLen _ = error "toASN1: X509.SignatureAlg.HashAlg: Unknown hash"
+oidRSAPSS, oidMGF1 :: OID
+oidRSAPSS = [1, 2, 840, 113549, 1, 1, 10]
+oidMGF1 = [1, 2, 840, 113549, 1, 1, 8]
 
-pss :: OID -> [ASN1] -> Either String (SignatureALG, [ASN1])
-pss hash xs = case lookup hash pssHashTable of
-    Just h -> Right (SignatureALG h PubKeyALG_RSAPSS, xs)
-    Nothing -> Left ("fromASN1: X509.SignatureALG: unknown PSS hash " ++ show hash)
+-- | Parse the contents of RSASSA-PSS-params, after its 'Start' 'Sequence'.
+parsePSSParams :: [ASN1] -> Either String (PSSParams, [ASN1])
+parsePSSParams xs0 = do
+    (h, xs1) <- field 0 hashAlg HashSHA1 xs0
+    (m, xs2) <- field 1 mgf HashSHA1 xs1
+    (s, xs3) <- field 2 int 20 xs2
+    (t, xs4) <- field 3 int 1 xs3
+    case xs4 of
+        End Sequence : rest
+            | t == (1 :: Int) -> Right (PSSParams h m s, rest)
+        _ -> Left "fromASN1: X509.SignatureALG: invalid PSS parameters"
+  where
+    field n p _ (Start (Container Context n') : xs)
+        | n == n' = do
+            (v, ys) <- p xs
+            case ys of
+                End (Container Context n'') : zs | n'' == n -> Right (v, zs)
+                _ -> Left "fromASN1: X509.SignatureALG: invalid PSS parameters"
+    field _ _ def xs = Right (def, xs)
+    hashAlg (Start Sequence : OID o : Null : End Sequence : xs) = hashOID o xs
+    hashAlg (Start Sequence : OID o : End Sequence : xs) = hashOID o xs
+    hashAlg _ = Left "fromASN1: X509.SignatureALG: invalid PSS hash"
+    hashOID o xs = case lookup o pssHashTable of
+        Just h -> Right (h, xs)
+        Nothing -> Left ("fromASN1: X509.SignatureALG: unknown PSS hash " ++ show o)
+    mgf (Start Sequence : OID o : xs)
+        | o == oidMGF1 = do
+            (h, ys) <- hashAlg xs
+            case ys of
+                End Sequence : zs -> Right (h, zs)
+                _ -> Left "fromASN1: X509.SignatureALG: invalid MGF1"
+    mgf _ = Left "fromASN1: X509.SignatureALG: unsupported mask generation function"
+    int (IntVal i : xs)
+        | i >= 0 && i <= 65536 = Right (fromIntegral i, xs)
+    int _ = Left "fromASN1: X509.SignatureALG: invalid PSS integer"
+
+-- | Encode RSASSA-PSS-params, omitting the DER default values.
+encodePSSParams :: PSSParams -> [ASN1] -> [ASN1]
+encodePSSParams (PSSParams h m s) xs =
+    Start Sequence
+        : OID oidRSAPSS
+        : Start Sequence
+        : (hashField ++ mgfField ++ saltField ++ End Sequence : End Sequence : xs)
+  where
+    hashField
+        | h == HashSHA1 = []
+        | otherwise = ctx 0 [Start Sequence, OID (pssHashOID h), End Sequence]
+    mgfField
+        | m == HashSHA1 = []
+        | otherwise =
+            ctx 1 $
+                [Start Sequence, OID oidMGF1, Start Sequence, OID (pssHashOID m)]
+                    ++ [End Sequence, End Sequence]
+    saltField
+        | s == 20 = []
+        | otherwise = ctx 2 [IntVal (fromIntegral s)]
+    ctx n l = Start (Container Context n) : l ++ [End (Container Context n)]
 
 instance ASN1Object SignatureALG where
     fromASN1 (Start Sequence : OID oid : Null : End Sequence : xs) =
@@ -155,101 +257,17 @@ instance ASN1Object SignatureALG where
             signatureAlg -> Right (signatureAlg, xs)
     fromASN1 (Start Sequence : OID oid : End Sequence : xs) =
         Right (oidSig oid, xs)
-    fromASN1
-        ( Start Sequence
-                : OID [1, 2, 840, 113549, 1, 1, 10]
-                : Start Sequence
-                : Start (Container Context 0)
-                : Start Sequence
-                : OID hash1
-                : End Sequence
-                : End (Container Context 0)
-                : Start (Container Context 1)
-                : Start Sequence
-                : OID [1, 2, 840, 113549, 1, 1, 8]
-                : Start Sequence
-                : OID _hash2
-                : End Sequence
-                : End Sequence
-                : End (Container Context 1)
-                : Start (Container Context 2)
-                : IntVal _iv
-                : End (Container Context 2)
-                : End Sequence
-                : End Sequence
-                : xs
-            ) =
-            pss hash1 xs
-    fromASN1
-        ( Start Sequence
-                : OID [1, 2, 840, 113549, 1, 1, 10]
-                : Start Sequence
-                : Start (Container Context 0)
-                : Start Sequence
-                : OID hash1
-                : Null
-                : End Sequence
-                : End (Container Context 0)
-                : Start (Container Context 1)
-                : Start Sequence
-                : OID [1, 2, 840, 113549, 1, 1, 8]
-                : Start Sequence
-                : OID _hash2
-                : Null
-                : End Sequence
-                : End Sequence
-                : End (Container Context 1)
-                : Start (Container Context 2)
-                : IntVal _iv
-                : End (Container Context 2)
-                : End Sequence
-                : End Sequence
-                : xs
-            ) =
-            pss hash1 xs
-    -- RSASSA-PSS with all parameters defaulted: SHA-1, MGF1 with SHA-1, salt 20
-    fromASN1
-        ( Start Sequence
-                : OID [1, 2, 840, 113549, 1, 1, 10]
-                : Start Sequence
-                : End Sequence
-                : End Sequence
-                : xs
-            ) =
-            Right (SignatureALG HashSHA1 PubKeyALG_RSAPSS, xs)
+    fromASN1 (Start Sequence : OID oid : Start Sequence : xs)
+        | oid == oidRSAPSS = do
+            (p, ys) <- parsePSSParams xs
+            case ys of
+                End Sequence : zs -> Right (rsaPSSSignatureALG p, zs)
+                _ -> Left "fromASN1: X509.SignatureALG: invalid PSS parameters"
     fromASN1 _ =
         Left "fromASN1: X509.SignatureALG: unknown format"
     toASN1 (SignatureALG_Unknown oid) = \xs -> Start Sequence : OID oid : Null : End Sequence : xs
-    toASN1 (SignatureALG HashSHA1 PubKeyALG_RSAPSS) = \xs ->
-        Start Sequence
-            : OID [1, 2, 840, 113549, 1, 1, 10]
-            : Start Sequence
-            : End Sequence
-            : End Sequence
-            : xs
-    toASN1 (SignatureALG hashAlg PubKeyALG_RSAPSS) = \xs ->
-        Start Sequence
-            : OID [1, 2, 840, 113549, 1, 1, 10]
-            : Start Sequence
-            : Start (Container Context 0)
-            : Start Sequence
-            : OID (pssHashOID hashAlg)
-            : End Sequence
-            : End (Container Context 0)
-            : Start (Container Context 1)
-            : Start Sequence
-            : OID [1, 2, 840, 113549, 1, 1, 8]
-            : Start Sequence
-            : OID (pssHashOID hashAlg)
-            : End Sequence
-            : End Sequence
-            : End (Container Context 1)
-            : Start (Container Context 2)
-            : IntVal (saltLen hashAlg)
-            : End (Container Context 2)
-            : End Sequence
-            : End Sequence
-            : xs
+    toASN1 (SignatureALG h PubKeyALG_RSAPSS) = encodePSSParams (defaultPSSParams h)
+    toASN1 (SignatureALG_RSAPSS p) = encodePSSParams p
     toASN1 signatureAlg@(SignatureALG_IntrinsicHash _) = \xs -> Start Sequence : OID (sigOID signatureAlg) : End Sequence : xs
     -- ECDSA: "the encoding MUST omit the parameters field"
     -- (RFC 5758 3.2, RFC 3279 2.2.3)
