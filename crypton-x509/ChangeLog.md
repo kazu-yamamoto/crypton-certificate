@@ -6,6 +6,8 @@
   [#53](https://github.com/kazu-yamamoto/crypton-certificate/pull/53)
 * Keep multi-valued RDNs
   [#54](https://github.com/kazu-yamamoto/crypton-certificate/pull/54)
+* Represent X9.42 DH public keys
+  [#55](https://github.com/kazu-yamamoto/crypton-certificate/pull/55)
 
 ## 1.10.3
 
