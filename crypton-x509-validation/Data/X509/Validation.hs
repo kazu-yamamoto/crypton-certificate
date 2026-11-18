@@ -32,6 +32,7 @@ module Data.X509.Validation (
     checkLeafKeyUsage,
     checkLeafKeyPurpose,
     checkFQHN,
+    checkRejectSHA1,
     ValidationHooks,
     hookMatchSubjectIssuer,
     hookValidateTime,
@@ -119,6 +120,8 @@ data FailedReason
       CacheSaysNo String
     | -- | signature failed
       InvalidSignature SignatureFailure
+    | -- | a reason given by a hook, e.g. a revocation check
+      OtherReason String
     deriving (Show, Eq)
 
 -- | A set of checks to activate or parametrize to perform on certificates.
@@ -164,6 +167,9 @@ data ValidationChecks = ValidationChecks
     , checkFQHN :: Bool
     -- ^ Check the top certificate names matching the fully qualified hostname (FQHN).
     -- it's not recommended to turn this check off, if no other name checks are performed.
+    , checkRejectSHA1 :: Bool
+    -- ^ Reject certificates signed with SHA-1.  The signatures of trust
+    -- anchors are not checked.  MD2 and MD5 are always rejected.
     }
     deriving (Show, Eq)
 
@@ -205,6 +211,7 @@ defaultChecks =
         , checkLeafKeyUsage = []
         , checkLeafKeyPurpose = []
         , checkFQHN = True
+        , checkRejectSHA1 = False
         }
 
 instance Default ValidationChecks where
@@ -490,6 +497,8 @@ validatePure validationTime hooks checks store (fqhn, _) (CertificateChain (top 
     checkSignature signedCert signingCert
         | signedAlg (getSigned signedCert) /= certSignatureAlg (getCertificate signedCert) =
             [InvalidSignature SignatureInvalid]
+        | checkRejectSHA1 checks && isSHA1 (signedAlg (getSigned signedCert)) =
+            [InvalidSignature SignatureUnimplemented]
         | otherwise =
             case verifySignedSignature signedCert (certPubKey $ getCertificate signingCert) of
                 SignaturePass -> []
@@ -506,6 +515,10 @@ validatePure validationTime hooks checks store (fqhn, _) (CertificateChain (top 
       where
         -- the level counts from the leaf
         spec level c = getNameConstSpec (getCertificate c) (level == 0 && checkFQHN checks)
+
+isSHA1 :: SignatureALG -> Bool
+isSHA1 (SignatureALG HashSHA1 _) = True
+isSHA1 _ = False
 
 -- | Whether BasicConstraints says the certificate is not a CA.
 notCA :: Certificate -> Bool

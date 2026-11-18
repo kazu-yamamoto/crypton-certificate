@@ -4,6 +4,8 @@
 
 * Hide the constructors of ValidationChecks and ValidationHooks
   [#51](https://github.com/kazu-yamamoto/crypton-certificate/pull/51)
+* Add checkRejectSHA1 and OtherReason
+  [#52](https://github.com/kazu-yamamoto/crypton-certificate/pull/52)
 
 ## 1.10.3
 
