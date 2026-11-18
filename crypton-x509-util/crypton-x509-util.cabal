@@ -1,6 +1,6 @@
 cabal-version:      >=1.10
 name:               crypton-x509-util
-version:            1.9.1
+version:            1.9.2
 license:            BSD3
 license-file:       LICENSE
 copyright:          Vincent Hanquez <vincent@snar.org>
@@ -19,7 +19,7 @@ extra-source-files: ChangeLog.md
 source-repository head
     type:     git
     location: https://github.com/kazu-yamamoto/crypton-certificate
-    subdir:   x509-util
+    subdir:   crypton-x509-util
 
 executable crypton-x509-util
     main-is:          Certificate.hs

@@ -17,6 +17,7 @@ import Data.X509.Validation
 import System.Console.GetOpt
 import System.Environment
 import System.Exit
+import System.IO (hPutStrLn, stderr)
 import System.X509
 
 -- for signing/verifying certificate
@@ -343,7 +344,7 @@ doCertMain opts files = do
         putStrLn $
             usageInfo "usage: x509-util cert [options] <certificates>" optionsCert
         exitSuccess
-    objs <- readSignedObject (head files)
+    objs <- (firstFile files >>= readSignedObject)
     forM_ objs $ \o ->
         case o of
             Left err -> error ("decoding Certificate failed: " ++ show err)
@@ -381,21 +382,21 @@ doCertMain opts files = do
     accHost a _ = a
 
 doCRLMain opts files = do
-    readSignedObject (head files) >>= \objs -> forM_ objs $ \o ->
+    (firstFile files >>= readSignedObject) >>= \objs -> forM_ objs $ \o ->
         case o of
             Left err -> error ("decoding CRL failed: " ++ show err)
             Right signed -> do
                 putStrLn $ show $ getCRL signed
 
 doASN1Main files = do
-    pem <- readPEMFile (head files)
+    pem <- (firstFile files >>= readPEMFile)
     forM_ pem $ \p ->
         case decodeASN1' BER $ pemContent p of
             Left err -> error ("decoding ASN1 failed: " ++ show err)
             Right asn1 -> showASN1 0 asn1
 
 doKeyMain files = do
-    pems <- readPEMFile (head files)
+    pems <- (firstFile files >>= readPEMFile)
     forM_ pems $ \pem -> do
         let content = either (error . show) id $ decodeASN1' BER (pemContent pem)
             privkey = catMaybes $ pemToKey [] pem
@@ -452,6 +453,10 @@ getoptMain opts f as =
     case getOpt Permute opts as of
         (o, n, []) -> f o n
         (_, _, err) -> error (show err)
+
+firstFile :: [FilePath] -> IO FilePath
+firstFile (f : _) = return f
+firstFile [] = hPutStrLn stderr "x509-util: no file given" >> exitFailure
 
 usage = do
     putStrLn "usage: x509-util <cmd>"

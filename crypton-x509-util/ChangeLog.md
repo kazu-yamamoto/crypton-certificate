@@ -1,5 +1,10 @@
 # ChangeLog for crypton-x509-util
 
+## 1.9.2
+
+* Fix trust store loading
+  [#38](https://github.com/kazu-yamamoto/crypton-certificate/pull/38)
+
 ## 1.9.1
 
 * Show ML-DSA keys, with the seed when the file held one

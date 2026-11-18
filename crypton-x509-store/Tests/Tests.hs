@@ -1,10 +1,17 @@
 -- | x509-store test suite.
 module Main (main) where
 
+import Control.Exception (bracket_)
 import qualified Data.ByteString as B
+import qualified Data.ByteString.Char8 as BC
+import Data.Maybe (isJust, isNothing)
 import Data.String (fromString)
 import Data.X509
+import Data.X509.CertificateStore
 import Data.X509.Memory
+import System.Directory
+import System.FilePath ((</>))
+import System.Info (os)
 
 import Test.Tasty
 import Test.Tasty.HUnit
@@ -390,6 +397,69 @@ memoryCertificateTests =
     readSignedCertificateFromMemory :: B.ByteString -> [SignedCertificate]
     readSignedCertificateFromMemory = readSignedObjectFromMemory
 
+keyOrderTest :: TestTree
+keyOrderTest =
+    testCase "Key order" $
+        map kind (readKeyFileFromMemory (rsaKey2 <> ed25519Key2 <> dsaKey2))
+            @?= ["RSA", "Ed25519", "DSA"]
+  where
+    kind PrivKeyRSA{} = "RSA"
+    kind PrivKeyEd25519{} = "Ed25519"
+    kind PrivKeyDSA{} = "DSA"
+    kind _ = "other" :: String
+
+-- | Runs an action in a fresh temporary directory.
+withTempDir :: (FilePath -> IO a) -> IO a
+withTempDir f = do
+    tmp <- getTemporaryDirectory
+    let dir = tmp </> "crypton-x509-store-test"
+    removePathForcibly dir
+    bracket_ (createDirectory dir) (removePathForcibly dir) (f dir)
+
+storeTests :: TestTree
+storeTests =
+    testGroup
+        "CertificateStore"
+        [ testCase "TRUSTED CERTIFICATE is skipped" $ withTempDir $ \dir -> do
+            let file = dir </> "bundle.crt"
+            B.writeFile file $ relabel rsaCertificate <> dsaCertificate
+            certs <- readCertificates file
+            length certs @?= 1
+        , testCase "broken PEM block is skipped" $ withTempDir $ \dir -> do
+            let file = dir </> "bundle.pem"
+            B.writeFile file $ rsaCertificate <> broken <> dsaCertificate
+            certs <- readCertificates file
+            length certs @?= 2
+        , testCase "hashed regular file is read" $ withTempDir $ \dir -> do
+            B.writeFile (dir </> "00673b5b.0") rsaCertificate
+            store <- readCertificateStore dir
+            assertBool "empty store" $ isJust store
+        , testCase "hashed symbolic link is skipped" $
+            if os == "mingw32"
+                then return ()
+                else withTempDir $ \dir -> do
+                    let sub = dir </> "certs"
+                    createDirectory sub
+                    B.writeFile (dir </> "target.pem") rsaCertificate
+                    createFileLink (dir </> "target.pem") (sub </> "00673b5b.0")
+                    store <- readCertificateStore sub
+                    assertBool "non-empty store" $ isNothing store
+        , testCase "composed empty store is empty" $
+            assertBool "not empty" $
+                isEmptyCertificateStore (mempty <> mempty)
+        ]
+  where
+    relabel = BC.pack . replace "CERTIFICATE-----" "TRUSTED CERTIFICATE-----" . BC.unpack
+    replace old new str@(c : cs)
+        | take (length old) str == old = new ++ replace old new (drop (length old) str)
+        | otherwise = c : replace old new cs
+    replace _ _ [] = []
+    broken =
+        fromString $
+            "-----BEGIN CERTIFICATE-----\n"
+                ++ "abc\n"
+                ++ "-----END CERTIFICATE-----\n"
+
 -- | Runs the test suite.
 main :: IO ()
 main =
@@ -400,5 +470,7 @@ main =
                 "Memory"
                 [ memoryKeyTests
                 , memoryCertificateTests
+                , keyOrderTest
                 ]
+            , storeTests
             ]

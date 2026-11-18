@@ -1,6 +1,6 @@
 cabal-version:      >=1.10
 name:               crypton-x509-store
-version:            1.10.0
+version:            1.10.1
 license:            BSD3
 license-file:       LICENSE
 copyright:          Vincent Hanquez <vincent@snarc.org>
@@ -19,7 +19,7 @@ extra-source-files: ChangeLog.md
 source-repository head
     type:     git
     location: https://github.com/kazu-yamamoto/crypton-certificate
-    subdir:   x509-store
+    subdir:   crypton-x509-store
 
 library
     exposed-modules:
@@ -57,4 +57,6 @@ test-suite test-x509-store
         tasty,
         tasty-hunit,
         crypton-x509,
-        crypton-x509-store
+        crypton-x509-store,
+        directory,
+        filepath
