@@ -35,7 +35,7 @@ executable crypton-x509-util
         crypton-x509 >=1.10 && <1.11,
         crypton-x509-store >=1.10 && <1.11,
         crypton-x509-system >=1.10 && <1.11,
-        crypton-x509-validation >=1.10 && <1.11,
+        crypton-x509-validation >=1.11 && <1.12,
         directory,
         ram,
         time-hourglass

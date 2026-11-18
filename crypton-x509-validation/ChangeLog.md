@@ -1,5 +1,10 @@
 # ChangeLog for crypton-x509-validation
 
+## 1.11.0
+
+* Hide the constructors of ValidationChecks and ValidationHooks
+  [#51](https://github.com/kazu-yamamoto/crypton-certificate/pull/51)
+
 ## 1.10.3
 
 MD2 and MD5 signatures are rejected, and certification paths are built
