@@ -161,13 +161,14 @@ verifySignature' (SignatureALG hashALG pubkeyALG) pubkey cdata signature
             Nothing -> False
             Just dsaSig -> DSA.verify hsh key dsaSig b
 
-    rsaVerify HashMD2 = RSA.verify (Just MD2)
-    rsaVerify HashMD5 = RSA.verify (Just MD5)
-    rsaVerify HashSHA1 = RSA.verify (Just SHA1)
-    rsaVerify HashSHA224 = RSA.verify (Just SHA224)
-    rsaVerify HashSHA256 = RSA.verify (Just SHA256)
-    rsaVerify HashSHA384 = RSA.verify (Just SHA384)
-    rsaVerify HashSHA512 = RSA.verify (Just SHA512)
+    rsaVerify HashMD2 = rsaVerifyWith MD2
+    rsaVerify HashMD5 = rsaVerifyWith MD5
+    rsaVerify HashSHA1 = rsaVerifyWith SHA1
+    rsaVerify HashSHA224 = rsaVerifyWith SHA224
+    rsaVerify HashSHA256 = rsaVerifyWith SHA256
+    rsaVerify HashSHA384 = rsaVerifyWith SHA384
+    rsaVerify HashSHA512 = rsaVerifyWith SHA512
+    rsaVerifyWith h key msg = RSA.verifyDigest key (hashWith h msg)
 verifySignature' (SignatureALG_IntrinsicHash pubkeyALG) pubkey cdata signature
     | pubkeyToAlg pubkey == pubkeyALG = doVerify pubkey
     | otherwise = SignatureFailed SignaturePubkeyMismatch
