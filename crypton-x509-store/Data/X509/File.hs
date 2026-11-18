@@ -1,25 +1,16 @@
-{-# LANGUAGE CPP #-}
-
 module Data.X509.File (
     readSignedObject,
     readKeyFile,
     PEMError (..),
 ) where
 
-#ifndef MIN_VERSION_unix
-#define MIN_VERSION_unix(x, y, z) 0
-#endif
-
 import qualified Control.Exception as E
 import Data.ASN1.Types
-import qualified Data.ByteString.Lazy as L
 import Data.Maybe
-import Data.PEM (PEM, pemContent, pemParseLBS)
+import Data.PEM (PEM, pemContent, pemParseBS)
 import qualified Data.X509 as X509
 import Data.X509.Memory (pemToKey)
-#if defined(MIN_VERSION_unix) && MIN_VERSION_unix(2,8,0)
-import System.Posix.IO
-#endif
+import Data.X509.ReadFile (readFileCloexec)
 
 newtype PEMError = PEMError {displayPEMError :: String}
     deriving (Show)
@@ -29,14 +20,8 @@ instance E.Exception PEMError where
 
 readPEMs :: FilePath -> IO [PEM]
 readPEMs filepath = do
-#if defined(MIN_VERSION_unix) && MIN_VERSION_unix(2,8,0)
-    fd <- openFd filepath ReadOnly defaultFileFlags{cloexec = True}
-    h <- fdToHandle fd
-    content <- L.hGetContents h
-#else
-    content <- L.readFile filepath
-#endif
-    either (E.throw . PEMError) pure $ pemParseLBS content
+    content <- readFileCloexec filepath
+    either (E.throwIO . PEMError) pure $ pemParseBS content
 
 -- | return all the signed objects in a file.
 --
@@ -52,4 +37,4 @@ readSignedObject filepath = decodePEMs <$> readPEMs filepath
 
 -- | return all the private keys that were successfully read from a file.
 readKeyFile :: FilePath -> IO [X509.PrivKey]
-readKeyFile path = catMaybes . foldl pemToKey [] <$> readPEMs path
+readKeyFile path = catMaybes . concatMap (pemToKey []) <$> readPEMs path
