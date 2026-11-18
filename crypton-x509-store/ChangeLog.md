@@ -4,6 +4,8 @@
 
 * Fix trust store loading
   [#38](https://github.com/kazu-yamamoto/crypton-certificate/pull/38)
+* Build certification paths with backtracking and implement CRL distribution points
+  [#48](https://github.com/kazu-yamamoto/crypton-certificate/pull/48)
 
 ## 1.10.0
 
