@@ -102,8 +102,8 @@ weakHash _ = False
 
 -- | Reject key parameters that are invalid or too costly to verify with.
 acceptablePubKey :: PubKey -> Bool
-acceptablePubKey (PubKeyRSA (RSA.PublicKey _ n e)) =
-    n > 1 && numBits n <= 16384 && e > 1 && numBits e <= 64
+acceptablePubKey (PubKeyRSA key) = acceptableRSA key
+acceptablePubKey (PubKeyRSAPSS key _) = acceptableRSA key
 acceptablePubKey (PubKeyDSA (DSA.PublicKey (DSA.Params p g q) y)) =
     p > 2
         && numBits p <= 8192
@@ -115,6 +115,10 @@ acceptablePubKey (PubKeyDSA (DSA.PublicKey (DSA.Params p g q) y)) =
         && y > 1
         && y < p
 acceptablePubKey _ = True
+
+acceptableRSA :: RSA.PublicKey -> Bool
+acceptableRSA (RSA.PublicKey _ n e) =
+    n > 1 && numBits n <= 16384 && e > 1 && numBits e <= 64
 
 verifySignature'
     :: SignatureALG -> PubKey -> ByteString -> ByteString -> SignatureVerification
@@ -190,6 +194,14 @@ verifySignature' (SignatureALG_IntrinsicHash pubkeyALG) pubkey cdata signature
 
 verifyPSS
     :: PSSParams -> PubKey -> ByteString -> ByteString -> SignatureVerification
+verifyPSS params (PubKeyRSAPSS key mkp) cdata signature
+    -- RFC 4055 3.3: the hash and MGF must match and the salt is not shorter
+    | Just kp <- mkp
+    , pssHash params /= pssHash kp
+        || pssMGFHash params /= pssMGFHash kp
+        || pssSaltLength params < pssSaltLength kp =
+        SignatureFailed SignaturePubkeyMismatch
+    | otherwise = verifyPSS params (PubKeyRSA key) cdata signature
 verifyPSS params (PubKeyRSA key) cdata signature =
     case withPSSHash (pssHash params) $ \h -> withPSSHash (pssMGFHash params) $ \m ->
         Just (PSS.verify (pssParams h m) key cdata signature) of

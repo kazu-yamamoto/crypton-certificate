@@ -15,6 +15,10 @@ module Data.X509.AlgorithmIdentifier (
     defaultPSSParams,
     rsaPSSSignatureALG,
     signatureALGPSSParams,
+
+    -- * Internal
+    pssKeyParamsFromASN1,
+    pssKeyAlgToASN1,
 ) where
 
 import Data.ASN1.Types
@@ -227,27 +231,48 @@ parsePSSParams xs0 = do
         | i >= 0 && i <= 65536 = Right (fromIntegral i, xs)
     int _ = Left "fromASN1: X509.SignatureALG: invalid PSS integer"
 
--- | Encode RSASSA-PSS-params, omitting the DER default values.
+-- | Encode an AlgorithmIdentifier of RSASSA-PSS with its parameters,
+-- omitting the DER default values.  Hash identifiers have NULL
+-- parameters as in RFC 4055 2.1.
 encodePSSParams :: PSSParams -> [ASN1] -> [ASN1]
-encodePSSParams (PSSParams h m s) xs =
-    Start Sequence
-        : OID oidRSAPSS
-        : Start Sequence
-        : (hashField ++ mgfField ++ saltField ++ End Sequence : End Sequence : xs)
+encodePSSParams p xs =
+    Start Sequence : OID oidRSAPSS : pssParamsToASN1 p (End Sequence : xs)
+
+pssParamsToASN1 :: PSSParams -> [ASN1] -> [ASN1]
+pssParamsToASN1 (PSSParams h m s) xs =
+    Start Sequence : (hashField ++ mgfField ++ saltField ++ End Sequence : xs)
   where
     hashField
         | h == HashSHA1 = []
-        | otherwise = ctx 0 [Start Sequence, OID (pssHashOID h), End Sequence]
+        | otherwise = ctx 0 [Start Sequence, OID (pssHashOID h), Null, End Sequence]
     mgfField
         | m == HashSHA1 = []
         | otherwise =
             ctx 1 $
-                [Start Sequence, OID oidMGF1, Start Sequence, OID (pssHashOID m)]
+                [Start Sequence, OID oidMGF1, Start Sequence, OID (pssHashOID m), Null]
                     ++ [End Sequence, End Sequence]
     saltField
         | s == 20 = []
         | otherwise = ctx 2 [IntVal (fromIntegral s)]
     ctx n l = Start (Container Context n) : l ++ [End (Container Context n)]
+
+-- | Parse the rest of an RSASSA-PSS key AlgorithmIdentifier, after its
+-- OID, up to and including its 'End' 'Sequence'.  Absent parameters
+-- (RFC 4055 1.2) mean that the key is not restricted.
+pssKeyParamsFromASN1 :: [ASN1] -> Either String (Maybe PSSParams, [ASN1])
+pssKeyParamsFromASN1 (End Sequence : xs) = Right (Nothing, xs)
+pssKeyParamsFromASN1 (Null : End Sequence : xs) = Right (Nothing, xs)
+pssKeyParamsFromASN1 (Start Sequence : xs) = do
+    (p, ys) <- parsePSSParams xs
+    case ys of
+        End Sequence : zs -> Right (Just p, zs)
+        _ -> Left "fromASN1: RSASSA-PSS key: invalid parameters"
+pssKeyParamsFromASN1 _ = Left "fromASN1: RSASSA-PSS key: invalid parameters"
+
+-- | Encode an AlgorithmIdentifier of an RSASSA-PSS key.
+pssKeyAlgToASN1 :: Maybe PSSParams -> [ASN1] -> [ASN1]
+pssKeyAlgToASN1 mp xs =
+    Start Sequence : OID oidRSAPSS : maybe id pssParamsToASN1 mp (End Sequence : xs)
 
 instance ASN1Object SignatureALG where
     fromASN1 (Start Sequence : OID oid : Null : End Sequence : xs) =

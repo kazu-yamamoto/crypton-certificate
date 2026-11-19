@@ -72,6 +72,7 @@ pemToKey acc pem =
         Left _ -> Nothing
         Right (k, _) -> Just $ X509.PrivKeyEC k
     tryNewcurve asn1 = case fromASN1 asn1 of
+        Right (k@(X509.PrivKeyRSAPSS _ _), _) -> Just k
         Right (k@(X509.PrivKeyX25519 _), _) -> Just k
         Right (k@(X509.PrivKeyX448 _), _) -> Just k
         Right (k@(X509.PrivKeyEd25519 _), _) -> Just k
