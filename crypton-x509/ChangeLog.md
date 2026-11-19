@@ -12,6 +12,8 @@
   [#57](https://github.com/kazu-yamamoto/crypton-certificate/pull/57)
 * Keep all fields of AuthorityKeyIdentifier
   [#58](https://github.com/kazu-yamamoto/crypton-certificate/pull/58)
+* Keep all fields of DistributionPoint
+  [#59](https://github.com/kazu-yamamoto/crypton-certificate/pull/59)
 
 ## 1.10.3
 
