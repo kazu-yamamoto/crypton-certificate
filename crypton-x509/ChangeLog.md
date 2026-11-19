@@ -8,6 +8,8 @@
   [#54](https://github.com/kazu-yamamoto/crypton-certificate/pull/54)
 * Represent X9.42 DH public keys
   [#55](https://github.com/kazu-yamamoto/crypton-certificate/pull/55)
+* Keep all GeneralName forms
+  [#57](https://github.com/kazu-yamamoto/crypton-certificate/pull/57)
 
 ## 1.10.3
 
