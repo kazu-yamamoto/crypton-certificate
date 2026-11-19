@@ -10,6 +10,8 @@
   [#55](https://github.com/kazu-yamamoto/crypton-certificate/pull/55)
 * Keep all GeneralName forms
   [#57](https://github.com/kazu-yamamoto/crypton-certificate/pull/57)
+* Keep all fields of AuthorityKeyIdentifier
+  [#58](https://github.com/kazu-yamamoto/crypton-certificate/pull/58)
 
 ## 1.10.3
 
