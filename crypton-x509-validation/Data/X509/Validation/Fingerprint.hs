@@ -40,3 +40,7 @@ getFingerprint sobj halg = Fingerprint $ mkHash halg $ encodeSignedObject sobj
     mkHash HashSHA256 = convert . hashWith SHA256
     mkHash HashSHA384 = convert . hashWith SHA384
     mkHash HashSHA512 = convert . hashWith SHA512
+    mkHash HashSHA3_224 = convert . hashWith SHA3_224
+    mkHash HashSHA3_256 = convert . hashWith SHA3_256
+    mkHash HashSHA3_384 = convert . hashWith SHA3_384
+    mkHash HashSHA3_512 = convert . hashWith SHA3_512

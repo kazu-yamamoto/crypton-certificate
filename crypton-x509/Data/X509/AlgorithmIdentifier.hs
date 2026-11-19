@@ -33,6 +33,10 @@ data HashALG
     | HashSHA256
     | HashSHA384
     | HashSHA512
+    | HashSHA3_224
+    | HashSHA3_256
+    | HashSHA3_384
+    | HashSHA3_512
     deriving (Show, Eq)
 
 -- | Public Key Algorithm
@@ -104,6 +108,10 @@ hashLength HashSHA224 = 28
 hashLength HashSHA256 = 32
 hashLength HashSHA384 = 48
 hashLength HashSHA512 = 64
+hashLength HashSHA3_224 = 28
+hashLength HashSHA3_256 = 32
+hashLength HashSHA3_384 = 48
+hashLength HashSHA3_512 = 64
 
 -- | The RSASSA-PSS signature algorithm with the given parameters.
 rsaPSSSignatureALG :: PSSParams -> SignatureALG
@@ -151,6 +159,18 @@ sig_table =
     , ([1, 2, 840, 10045, 4, 3, 4], SignatureALG HashSHA512 PubKeyALG_EC)
     , ([2, 16, 840, 1, 101, 3, 4, 3, 1], SignatureALG HashSHA224 PubKeyALG_DSA)
     , ([2, 16, 840, 1, 101, 3, 4, 3, 2], SignatureALG HashSHA256 PubKeyALG_DSA)
+    , ([2, 16, 840, 1, 101, 3, 4, 3, 5], SignatureALG HashSHA3_224 PubKeyALG_DSA)
+    , ([2, 16, 840, 1, 101, 3, 4, 3, 6], SignatureALG HashSHA3_256 PubKeyALG_DSA)
+    , ([2, 16, 840, 1, 101, 3, 4, 3, 7], SignatureALG HashSHA3_384 PubKeyALG_DSA)
+    , ([2, 16, 840, 1, 101, 3, 4, 3, 8], SignatureALG HashSHA3_512 PubKeyALG_DSA)
+    , ([2, 16, 840, 1, 101, 3, 4, 3, 9], SignatureALG HashSHA3_224 PubKeyALG_EC)
+    , ([2, 16, 840, 1, 101, 3, 4, 3, 10], SignatureALG HashSHA3_256 PubKeyALG_EC)
+    , ([2, 16, 840, 1, 101, 3, 4, 3, 11], SignatureALG HashSHA3_384 PubKeyALG_EC)
+    , ([2, 16, 840, 1, 101, 3, 4, 3, 12], SignatureALG HashSHA3_512 PubKeyALG_EC)
+    , ([2, 16, 840, 1, 101, 3, 4, 3, 13], SignatureALG HashSHA3_224 PubKeyALG_RSA)
+    , ([2, 16, 840, 1, 101, 3, 4, 3, 14], SignatureALG HashSHA3_256 PubKeyALG_RSA)
+    , ([2, 16, 840, 1, 101, 3, 4, 3, 15], SignatureALG HashSHA3_384 PubKeyALG_RSA)
+    , ([2, 16, 840, 1, 101, 3, 4, 3, 16], SignatureALG HashSHA3_512 PubKeyALG_RSA)
     , ([1, 3, 101, 112], SignatureALG_IntrinsicHash PubKeyALG_Ed25519)
     , ([1, 3, 101, 113], SignatureALG_IntrinsicHash PubKeyALG_Ed448)
     ,
@@ -175,6 +195,10 @@ pssHashTable =
     , ([2, 16, 840, 1, 101, 3, 4, 2, 2], HashSHA384)
     , ([2, 16, 840, 1, 101, 3, 4, 2, 3], HashSHA512)
     , ([2, 16, 840, 1, 101, 3, 4, 2, 4], HashSHA224)
+    , ([2, 16, 840, 1, 101, 3, 4, 2, 7], HashSHA3_224)
+    , ([2, 16, 840, 1, 101, 3, 4, 2, 8], HashSHA3_256)
+    , ([2, 16, 840, 1, 101, 3, 4, 2, 9], HashSHA3_384)
+    , ([2, 16, 840, 1, 101, 3, 4, 2, 10], HashSHA3_512)
     ]
 
 pssHashOID :: HashALG -> OID
@@ -300,4 +324,9 @@ instance ASN1Object SignatureALG where
     -- DSA: "the encoding SHALL omit the parameters field"
     -- (RFC 5758 3.1, RFC 3279 2.2.2)
     toASN1 signatureAlg@(SignatureALG _ PubKeyALG_DSA) = \xs -> Start Sequence : OID (sigOID signatureAlg) : End Sequence : xs
+    -- RSA with SHA-3: "the parameters MUST be absent" (RFC 9688 3.1)
+    toASN1 signatureAlg@(SignatureALG h PubKeyALG_RSA)
+        | isSHA3 h = \xs -> Start Sequence : OID (sigOID signatureAlg) : End Sequence : xs
+      where
+        isSHA3 = (`elem` [HashSHA3_224, HashSHA3_256, HashSHA3_384, HashSHA3_512])
     toASN1 signatureAlg = \xs -> Start Sequence : OID (sigOID signatureAlg) : Null : End Sequence : xs

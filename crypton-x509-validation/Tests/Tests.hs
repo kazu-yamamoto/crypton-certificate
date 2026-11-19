@@ -1902,6 +1902,9 @@ main =
             , treeWithAlg "RSAPSS" (AlgRSAPSS 2048 pssParams hashSHA224)
             , treeWithAlg "DSA" (AlgDSA dsaParams hashSHA1)
             , treeWithAlg "ECDSA" (AlgEC curveName hashSHA512)
+            , treeWithAlg "RSA SHA3" (AlgRSA 2048 hashSHA3_256)
+            , treeWithAlg "RSAPSS SHA3" (AlgRSAPSS 2048 (PSS.defaultPSSParams SHA3_256) hashSHA3_256)
+            , treeWithAlg "ECDSA SHA3" (AlgEC curveName hashSHA3_384)
             , treeWithAlg "Ed25519" AlgEd25519
             , treeWithAlg "Ed448" AlgEd448
             , treeWithAlg "ML-DSA-44" AlgMLDSA44
