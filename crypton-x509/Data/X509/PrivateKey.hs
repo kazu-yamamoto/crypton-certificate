@@ -3,7 +3,7 @@
 {-# LANGUAGE StandaloneDeriving #-}
 
 -- |
--- Module      : Data.X509.PublicKey
+-- Module      : Data.X509.PrivateKey
 -- License     : BSD-style
 -- Maintainer  : Vincent Hanquez <vincent@snarc.org>
 -- Stability   : experimental

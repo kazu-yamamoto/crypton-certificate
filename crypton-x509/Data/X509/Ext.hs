@@ -712,7 +712,6 @@ decodeGeneralSubtree (Start Sequence : xs) = do
 decodeGeneralSubtree _ =
     Left "GeneralSubtree: invalid ASN1"
 
--- | Decode the content octets of an IMPLICIT INTEGER.
 -- | The content octets of an IMPLICIT INTEGER (two's complement).
 intContent :: Integer -> B.ByteString
 intContent = B.pack . go
@@ -721,6 +720,7 @@ intContent = B.pack . go
         | i >= -128 && i < 128 = [fromIntegral i]
         | otherwise = go (i `shiftR` 8) ++ [fromIntegral (i .&. 0xff)]
 
+-- | Decode the content octets of an IMPLICIT INTEGER.
 implicitInt :: B.ByteString -> Either String Integer
 implicitInt bs
     | B.null bs = Left "empty integer"
