@@ -2,10 +2,19 @@
 
 ## 1.11.0
 
+The constructors of `ValidationChecks` and `ValidationHooks` are hidden;
+use `defaultChecks` and `defaultHooks` with record update syntax.
+RSA-PSS signatures are verified with their own parameters and the
+restrictions of RSASSA-PSS keys, and SHA-3 signatures are supported.
+
 * Hide the constructors of ValidationChecks and ValidationHooks
   [#51](https://github.com/kazu-yamamoto/crypton-certificate/pull/51)
 * Add checkRejectSHA1 and OtherReason
   [#52](https://github.com/kazu-yamamoto/crypton-certificate/pull/52)
+* Keep RSA-PSS parameters
+  [#53](https://github.com/kazu-yamamoto/crypton-certificate/pull/53)
+* Keep multi-valued RDNs
+  [#54](https://github.com/kazu-yamamoto/crypton-certificate/pull/54)
 * Keep all GeneralName forms
   [#57](https://github.com/kazu-yamamoto/crypton-certificate/pull/57)
 * Support RSASSA-PSS keys

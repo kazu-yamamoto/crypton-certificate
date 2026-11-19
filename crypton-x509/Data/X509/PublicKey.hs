@@ -80,9 +80,13 @@ data PubKeyEC
 -- hidden; use 'dhPublicKey' and record update syntax.
 data PubKeyDH = PubKeyDH_
     { pubkeyDH_p :: Integer
+    -- ^ the prime
     , pubkeyDH_g :: Integer
+    -- ^ the generator
     , pubkeyDH_q :: Integer
+    -- ^ the prime factor of p-1
     , pubkeyDH_j :: Maybe Integer
+    -- ^ the subgroup factor
     , pubkeyDH_validation :: Maybe (BitArray, Integer)
     -- ^ seed and pgenCounter
     , pubkeyDH_y :: Integer

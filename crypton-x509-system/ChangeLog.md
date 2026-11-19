@@ -1,5 +1,9 @@
 # ChangeLog for crypton-x509-system
 
+## 1.10.2
+
+Support crypton-x509 1.11.
+
 ## 1.10.1
 
 The system store contains only the certificates that the OS trusts for

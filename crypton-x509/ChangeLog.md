@@ -2,6 +2,14 @@
 
 ## 1.11.0
 
+Certificates are represented without losing information: RSA-PSS
+parameters, multi-valued RDNs, all GeneralName forms and all fields of
+AuthorityKeyIdentifier and DistributionPoint are kept.  Constructors of
+types that may grow are hidden; use the `default...` values with record
+update syntax.  `DistinguishedName`, `ExtAuthorityKeyId` and
+`MLDSAKeyForm` (now `MLKeyForm`) keep working through pattern synonyms.
+X9.42 DH, RSASSA-PSS and ML-KEM keys and SHA-3 signatures are supported.
+
 * Keep RSA-PSS parameters
   [#53](https://github.com/kazu-yamamoto/crypton-certificate/pull/53)
 * Keep multi-valued RDNs

@@ -1,5 +1,14 @@
 # ChangeLog for crypton-x509-store
 
+## 1.10.2
+
+Support crypton-x509 1.11.
+
+* Support RSASSA-PSS keys
+  [#61](https://github.com/kazu-yamamoto/crypton-certificate/pull/61)
+* Support ML-KEM keys
+  [#63](https://github.com/kazu-yamamoto/crypton-certificate/pull/63)
+
 ## 1.10.1
 
 `TRUSTED CERTIFICATE` PEM blocks are no longer used as trust anchors,
