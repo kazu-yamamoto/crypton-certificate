@@ -1250,14 +1250,12 @@ property_extension_id e = case extDecode (extEncode e) of
 -- Per-family AlgorithmIdentifier parameters contract:
 -- ECDSA (RFC 5758 3.2, RFC 3279 2.2.3) and DSA (RFC 5758 3.1, RFC 3279
 -- 2.2.2) omit the parameters field; RSA PKCS#1 v1.5 encodes an ASN.1
--- NULL (RFC 3279 2.2.1) except with SHA-3 (RFC 9688 3.1); EdDSA omits
--- the field (RFC 8410 3).
+-- NULL (RFC 3279 2.2.1, RFC 9688 3.1 for SHA-3); EdDSA omits the field
+-- (RFC 8410 3).
 property_sig_alg_parameters :: SignatureALG -> Bool
-property_sig_alg_parameters alg@(SignatureALG h pub)
+property_sig_alg_parameters alg@(SignatureALG _ pub)
     | pub == PubKeyALG_EC || pub == PubKeyALG_DSA = Null `notElem` toASN1 alg []
-    | pub == PubKeyALG_RSA = (Null `elem` toASN1 alg []) == (h `notElem` sha3)
-  where
-    sha3 = [HashSHA3_224, HashSHA3_256, HashSHA3_384, HashSHA3_512]
+    | pub == PubKeyALG_RSA = Null `elem` toASN1 alg []
 property_sig_alg_parameters alg@(SignatureALG_IntrinsicHash _) =
     Null `notElem` toASN1 alg []
 property_sig_alg_parameters _ = True

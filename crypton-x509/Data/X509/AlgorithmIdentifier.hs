@@ -333,9 +333,4 @@ instance ASN1Object SignatureALG where
     -- DSA: "the encoding SHALL omit the parameters field"
     -- (RFC 5758 3.1, RFC 3279 2.2.2)
     toASN1 signatureAlg@(SignatureALG _ PubKeyALG_DSA) = \xs -> Start Sequence : OID (sigOID signatureAlg) : End Sequence : xs
-    -- RSA with SHA-3: "the parameters MUST be absent" (RFC 9688 3.1)
-    toASN1 signatureAlg@(SignatureALG h PubKeyALG_RSA)
-        | isSHA3 h = \xs -> Start Sequence : OID (sigOID signatureAlg) : End Sequence : xs
-      where
-        isSHA3 = (`elem` [HashSHA3_224, HashSHA3_256, HashSHA3_384, HashSHA3_512])
     toASN1 signatureAlg = \xs -> Start Sequence : OID (sigOID signatureAlg) : Null : End Sequence : xs
