@@ -1,3 +1,5 @@
+{-# LANGUAGE PatternSynonyms #-}
+
 -- |
 -- Module      : Data.X509
 -- License     : BSD-style
@@ -27,12 +29,22 @@ module Data.X509 (
     PrivKey (..),
     PrivKeyEC (..),
     PrivKeyMLDSA,
-    MLDSAKeyForm (..),
+    MLKeyForm (..),
+    MLDSAKeyForm,
+    pattern MLDSAKeySeed,
+    pattern MLDSAKeyExpanded,
+    pattern MLDSAKeyBoth,
     privkeyMLDSAFromSeed,
     privkeyMLDSAFromKey,
     privkeyMLDSA_key,
     privkeyMLDSA_seed,
     privkeyMLDSA_form,
+    PrivKeyMLKEM,
+    privkeyMLKEMFromSeed,
+    privkeyMLKEMFromKey,
+    privkeyMLKEM_key,
+    privkeyMLKEM_seed,
+    privkeyMLKEM_form,
     pubkeyToAlg,
     privkeyToAlg,
     module Data.X509.AlgorithmIdentifier,

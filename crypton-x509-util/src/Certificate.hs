@@ -122,6 +122,9 @@ showCertSmall signedCert = do
         X509.PubKeyMLDSA44 _ -> printf "public key: ML-DSA-44\n"
         X509.PubKeyMLDSA65 _ -> printf "public key: ML-DSA-65\n"
         X509.PubKeyMLDSA87 _ -> printf "public key: ML-DSA-87\n"
+        X509.PubKeyMLKEM512 _ -> printf "public key: ML-KEM-512\n"
+        X509.PubKeyMLKEM768 _ -> printf "public key: ML-KEM-768\n"
+        X509.PubKeyMLKEM1024 _ -> printf "public key: ML-KEM-1024\n"
         X509.PubKeyUnknown oid ws -> printf "public key: unknown: %s\n" (show oid)
         pk -> printf "public key: %s\n" (show pk)
   where
@@ -195,6 +198,9 @@ showCert signedCert = do
         X509.PubKeyMLDSA44 pubkey -> showPubHexdump "ML-DSA-44" pubkey
         X509.PubKeyMLDSA65 pubkey -> showPubHexdump "ML-DSA-65" pubkey
         X509.PubKeyMLDSA87 pubkey -> showPubHexdump "ML-DSA-87" pubkey
+        X509.PubKeyMLKEM512 pubkey -> showPubHexdump "ML-KEM-512" pubkey
+        X509.PubKeyMLKEM768 pubkey -> showPubHexdump "ML-KEM-768" pubkey
+        X509.PubKeyMLKEM1024 pubkey -> showPubHexdump "ML-KEM-1024" pubkey
         X509.PubKeyUnknown oid ws -> do
             printf "public key unknown: %s\n" (show oid)
             printf "  raw bytes: %s\n" (show ws)
@@ -284,6 +290,12 @@ showMLDSAHexdump k =
     unlines $
         maybe [] (\s -> ["seed:   " ++ hexdump s]) (X509.privkeyMLDSA_seed k)
             ++ ["priv:   " ++ hexdump (X509.privkeyMLDSA_key k)]
+
+showSeedHexdump :: BA.ByteArrayAccess ba => Maybe BA.ScrubbedBytes -> ba -> String
+showSeedHexdump seed key =
+    unlines $
+        maybe [] (\s -> ["seed:   " ++ hexdump s]) seed
+            ++ ["priv:   " ++ hexdump key]
 
 showASN1 :: Int -> [ASN1] -> IO ()
 showASN1 at = prettyPrint at
@@ -430,6 +442,15 @@ doKeyMain files = do
                 putStrLn "ML-DSA-65 KEY" >> putStrLn (showMLDSAHexdump k)
             [X509.PrivKeyMLDSA87 k] ->
                 putStrLn "ML-DSA-87 KEY" >> putStrLn (showMLDSAHexdump k)
+            [X509.PrivKeyMLKEM512 k] ->
+                putStrLn "ML-KEM-512 KEY"
+                    >> putStrLn (showSeedHexdump (X509.privkeyMLKEM_seed k) (X509.privkeyMLKEM_key k))
+            [X509.PrivKeyMLKEM768 k] ->
+                putStrLn "ML-KEM-768 KEY"
+                    >> putStrLn (showSeedHexdump (X509.privkeyMLKEM_seed k) (X509.privkeyMLKEM_key k))
+            [X509.PrivKeyMLKEM1024 k] ->
+                putStrLn "ML-KEM-1024 KEY"
+                    >> putStrLn (showSeedHexdump (X509.privkeyMLKEM_seed k) (X509.privkeyMLKEM_key k))
             _ -> error "private key unknown"
 
 doSystemMain _ = do

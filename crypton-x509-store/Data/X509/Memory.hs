@@ -80,6 +80,9 @@ pemToKey acc pem =
         Right (k@(X509.PrivKeyMLDSA44 _), _) -> Just k
         Right (k@(X509.PrivKeyMLDSA65 _), _) -> Just k
         Right (k@(X509.PrivKeyMLDSA87 _), _) -> Just k
+        Right (k@(X509.PrivKeyMLKEM512 _), _) -> Just k
+        Right (k@(X509.PrivKeyMLKEM768 _), _) -> Just k
+        Right (k@(X509.PrivKeyMLKEM1024 _), _) -> Just k
         _ -> Nothing
 
 dsaFromASN1 :: [ASN1] -> Either String (DSA.KeyPair, [ASN1])

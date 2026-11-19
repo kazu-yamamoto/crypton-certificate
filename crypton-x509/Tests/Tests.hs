@@ -20,6 +20,7 @@ import qualified Crypto.PubKey.ECC.Types as ECC
 import qualified Crypto.PubKey.Ed25519 as Ed25519
 import qualified Crypto.PubKey.Ed448 as Ed448
 import qualified Crypto.PubKey.MLDSA as MLDSA
+import qualified Crypto.PubKey.MLKEM as MLKEM
 import qualified Crypto.PubKey.RSA as RSA
 import Data.ASN1.BinaryEncoding (DER (..))
 import Data.ASN1.BitArray (toBitArray)
@@ -33,6 +34,7 @@ import Data.X509
 import Data.X509.EC (ecPubKeyCurveName)
 
 import MLDSAKeys
+import MLKEMKeys
 
 import Data.Hourglass
 
@@ -81,6 +83,9 @@ instance Arbitrary PubKey where
             , PubKeyMLDSA44 . MLDSA.toPublic <$> arbitraryMLDSA (Proxy :: Proxy MLDSA.MLDSA44)
             , PubKeyMLDSA65 . MLDSA.toPublic <$> arbitraryMLDSA (Proxy :: Proxy MLDSA.MLDSA65)
             , PubKeyMLDSA87 . MLDSA.toPublic <$> arbitraryMLDSA (Proxy :: Proxy MLDSA.MLDSA87)
+            , PubKeyMLKEM512 . fst <$> arbitraryMLKEM (Proxy :: Proxy MLKEM.MLKEM512)
+            , PubKeyMLKEM768 . fst <$> arbitraryMLKEM (Proxy :: Proxy MLKEM.MLKEM768)
+            , PubKeyMLKEM1024 . fst <$> arbitraryMLKEM (Proxy :: Proxy MLKEM.MLKEM1024)
             ]
 
 arbitraryKeyPSS :: Gen (Maybe PSSParams)
@@ -157,7 +162,20 @@ instance Arbitrary PrivKey where
             , PrivKeyMLDSA44 <$> arbitraryPrivMLDSA (Proxy :: Proxy MLDSA.MLDSA44)
             , PrivKeyMLDSA65 <$> arbitraryPrivMLDSA (Proxy :: Proxy MLDSA.MLDSA65)
             , PrivKeyMLDSA87 <$> arbitraryPrivMLDSA (Proxy :: Proxy MLDSA.MLDSA87)
+            , PrivKeyMLKEM512 <$> arbitraryPrivMLKEM (Proxy :: Proxy MLKEM.MLKEM512)
+            , PrivKeyMLKEM768 <$> arbitraryPrivMLKEM (Proxy :: Proxy MLKEM.MLKEM768)
+            , PrivKeyMLKEM1024 <$> arbitraryPrivMLKEM (Proxy :: Proxy MLKEM.MLKEM1024)
             ]
+
+arbitraryMLKEM
+    :: MLKEM.MLKEM p
+    => proxy p -> Gen (MLKEM.EncapsulationKey p, MLKEM.DecapsulationKey p)
+arbitraryMLKEM p = throwCryptoError . MLKEM.keyPairFromSeed p <$> arbitraryBS 64 64
+
+arbitraryPrivMLKEM :: MLKEM.MLKEM p => proxy p -> Gen (PrivKeyMLKEM p)
+arbitraryPrivMLKEM p = do
+    form <- elements [MLKeySeed, MLKeyExpanded, MLKeyBoth]
+    throwCryptoError . privkeyMLKEMFromSeed p form <$> arbitraryBS 64 64
 
 arbitraryMLDSA :: MLDSA.MLDSA p => proxy p -> Gen (MLDSA.SigningKey p)
 arbitraryMLDSA p = snd . throwCryptoError . MLDSA.keyPairFromSeed p <$> arbitraryBS 32 32
@@ -166,7 +184,7 @@ arbitraryMLDSA p = snd . throwCryptoError . MLDSA.keyPairFromSeed p <$> arbitrar
 -- covers each of them and not just whichever one this module would pick.
 arbitraryPrivMLDSA :: MLDSA.MLDSA p => proxy p -> Gen (PrivKeyMLDSA p)
 arbitraryPrivMLDSA p = do
-    form <- elements [MLDSAKeySeed, MLDSAKeyExpanded, MLDSAKeyBoth]
+    form <- elements [MLKeySeed, MLKeyExpanded, MLKeyBoth]
     throwCryptoError . privkeyMLDSAFromSeed p form <$> arbitraryBS 32 32
 
 instance Arbitrary HashALG where
@@ -389,12 +407,12 @@ mldsaExpanded seed =
                 MLDSA.keyPairFromSeed (Proxy :: Proxy MLDSA.MLDSA44) seed
 
 -- | The three encodings of one seed, with the form each of them is.
-mldsaForms :: B.ByteString -> [(MLDSAKeyForm, [ASN1])]
+mldsaForms :: B.ByteString -> [(MLKeyForm, [ASN1])]
 mldsaForms seed =
-    [ (MLDSAKeySeed, [Other Context 0 seed])
-    , (MLDSAKeyExpanded, [OctetString expanded])
+    [ (MLKeySeed, [Other Context 0 seed])
+    , (MLKeyExpanded, [OctetString expanded])
     ,
-        ( MLDSAKeyBoth
+        ( MLKeyBoth
         , [Start Sequence, OctetString seed, OctetString expanded, End Sequence]
         )
     ]
@@ -444,7 +462,7 @@ property_mldsa_form_round_trip (MLDSASeed seed) = all ok (mldsaForms seed)
 property_mldsa_generated_seed :: Property
 property_mldsa_generated_seed = ioProperty $ do
     (_, sk, seed) <- MLDSA.generateKeyPairAndSeed p
-    let k = throwCryptoError $ privkeyMLDSAFromSeed p MLDSAKeySeed seed
+    let k = throwCryptoError $ privkeyMLDSAFromSeed p MLKeySeed seed
         privkey = PrivKeyMLDSA44 k
         encoded = toASN1 privkey []
     return $
@@ -477,7 +495,7 @@ property_mldsa_openssl = all ok keys
         Left _ -> False
         Right asn1 -> case fromASN1 asn1 :: Either String (PrivKey, [ASN1]) of
             Right (k, []) ->
-                formOf k == Just MLDSAKeyBoth
+                formOf k == Just MLKeyBoth
                     && encodeASN1' DER (toASN1 k []) == der
             _ -> False
     formOf (PrivKeyMLDSA44 k) = Just (privkeyMLDSA_form k)
@@ -504,7 +522,7 @@ property_mldsa_show_redacts (MLDSASeed seed) = all ok (map fst (mldsaForms seed)
          in not (hex seed `isInfixOf` shown)
                 && not (expanded `isInfixOf` shown)
                 && expanded `isInfixOf` debugged
-                && (form == MLDSAKeyExpanded || hex seed `isInfixOf` debugged)
+                && (form == MLKeyExpanded || hex seed `isInfixOf` debugged)
 
 property_mldsa_mismatch :: MLDSASeed -> MLDSASeed -> Property
 property_mldsa_mismatch (MLDSASeed seed1) (MLDSASeed seed2) =
@@ -1078,6 +1096,24 @@ property_rsapss_key =
     hexToBS (a : b : r) = read ("0x" ++ [a, b]) `B.cons` hexToBS r
     hexToBS _ = B.empty
 
+-- An ML-KEM-512 key pair written by OpenSSL is read in the both form,
+-- the public key matches the private key, and both encode back the same.
+property_mlkem_openssl :: Bool
+property_mlkem_openssl =
+    case (decode opensslMLKEM512Pub, decode opensslMLKEM512) of
+        (Right (pub@(PubKeyMLKEM512 ek), []), Right (priv@(PrivKeyMLKEM512 k), [])) ->
+            privkeyMLKEM_form k == MLKeyBoth
+                && fmap (fst . throwCryptoError . MLKEM.keyPairFromSeed p) (privkeyMLKEM_seed k)
+                    == Just ek
+                && privkeyToAlg priv == PubKeyALG_MLKEM512
+                && encodeASN1' DER (toASN1 pub []) == opensslMLKEM512Pub
+                && encodeASN1' DER (toASN1 priv []) == opensslMLKEM512
+        _ -> False
+  where
+    p = Proxy :: Proxy MLKEM.MLKEM512
+    decode :: ASN1Object a => B.ByteString -> Either String (a, [ASN1])
+    decode bs = either (Left . show) fromASN1 (decodeASN1' DER bs)
+
 -- Multi-valued RDNs are kept and differ from separate RDNs; the canonical
 -- form ignores the order inside an RDN.
 property_multi_valued_rdn :: Bool
@@ -1286,6 +1322,7 @@ main =
                     , testProperty "DN element OID" property_dn_element_oid
                     , testProperty "DH public key" property_dh_pubkey
                     , testProperty "RSASSA-PSS key" property_rsapss_key
+                    , testProperty "ML-KEM OpenSSL key" property_mlkem_openssl
                     , testProperty "EC private key length" property_ec_privkey_length
                     , testProperty "EC curve name" property_ec_curve_name
                     ]

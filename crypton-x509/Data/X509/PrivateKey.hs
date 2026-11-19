@@ -1,3 +1,7 @@
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE StandaloneDeriving #-}
+
 -- |
 -- Module      : Data.X509.PublicKey
 -- License     : BSD-style
@@ -10,12 +14,22 @@ module Data.X509.PrivateKey (
     PrivKey (..),
     PrivKeyEC (..),
     PrivKeyMLDSA,
-    MLDSAKeyForm (..),
+    MLKeyForm (..),
+    MLDSAKeyForm,
+    pattern MLDSAKeySeed,
+    pattern MLDSAKeyExpanded,
+    pattern MLDSAKeyBoth,
     privkeyMLDSAFromSeed,
     privkeyMLDSAFromKey,
     privkeyMLDSA_key,
     privkeyMLDSA_seed,
     privkeyMLDSA_form,
+    PrivKeyMLKEM,
+    privkeyMLKEMFromSeed,
+    privkeyMLKEMFromKey,
+    privkeyMLKEM_key,
+    privkeyMLKEM_seed,
+    privkeyMLKEM_form,
     privkeyToAlg,
 ) where
 
@@ -47,6 +61,7 @@ import qualified Crypto.PubKey.ECC.Types as ECC
 import qualified Crypto.PubKey.Ed25519 as Ed25519
 import qualified Crypto.PubKey.Ed448 as Ed448
 import qualified Crypto.PubKey.MLDSA as MLDSA
+import qualified Crypto.PubKey.MLKEM as MLKEM
 import qualified Crypto.PubKey.RSA as RSA
 
 -- | Elliptic Curve Private Key
@@ -109,16 +124,39 @@ showsPrivKeyEC priv d (PrivKeyEC_Named n _) =
             . priv
             . showChar '}'
 
--- | Which of the three forms of RFC 9881 Section 6 a private key was read
--- as, and is written back out as.
-data MLDSAKeyForm
+-- | Which of the three forms of an ML-DSA (RFC 9881 Section 6) or ML-KEM
+-- (RFC 9935 Section 6) private key a key was read as, and is written back
+-- out as.
+data MLKeyForm
     = -- | The seed alone, @seed@, which Section 6 recommends.
-      MLDSAKeySeed
+      MLKeySeed
     | -- | The expanded key alone, @expandedKey@.
-      MLDSAKeyExpanded
+      MLKeyExpanded
     | -- | Both together, @both@.
-      MLDSAKeyBoth
+      MLKeyBoth
     deriving (Show, Eq)
+
+-- | The former name of 'MLKeyForm'.
+type MLDSAKeyForm = MLKeyForm
+
+{-# DEPRECATED MLDSAKeyForm "Use MLKeyForm" #-}
+
+-- | The former name of 'MLKeySeed'.
+pattern MLDSAKeySeed :: MLKeyForm
+pattern MLDSAKeySeed = MLKeySeed
+
+-- | The former name of 'MLKeyExpanded'.
+pattern MLDSAKeyExpanded :: MLKeyForm
+pattern MLDSAKeyExpanded = MLKeyExpanded
+
+-- | The former name of 'MLKeyBoth'.
+pattern MLDSAKeyBoth :: MLKeyForm
+pattern MLDSAKeyBoth = MLKeyBoth
+
+{-# COMPLETE MLDSAKeySeed, MLDSAKeyExpanded, MLDSAKeyBoth #-}
+{-# DEPRECATED MLDSAKeySeed "Use MLKeySeed" #-}
+{-# DEPRECATED MLDSAKeyExpanded "Use MLKeyExpanded" #-}
+{-# DEPRECATED MLDSAKeyBoth "Use MLKeyBoth" #-}
 
 -- | An ML-DSA private key.
 --
@@ -177,18 +215,18 @@ instance DebugShow (PrivKeyMLDSA p) where
 -- | Build a key from its seed, to be written back out in the given form.
 --
 -- The expanded key is derived here, so it cannot fail to be the one the
--- seed belongs to.  Passing 'MLDSAKeyExpanded' throws the seed away, which
+-- seed belongs to.  Passing 'MLKeyExpanded' throws the seed away, which
 -- is the way to turn a seed into a key that will be written without one.
 privkeyMLDSAFromSeed
     :: (MLDSA.MLDSA p, ByteArrayAccess ba)
-    => proxy p -> MLDSAKeyForm -> ba -> CryptoFailable (PrivKeyMLDSA p)
+    => proxy p -> MLKeyForm -> ba -> CryptoFailable (PrivKeyMLDSA p)
 privkeyMLDSAFromSeed p form bs = case MLDSA.keyPairFromSeed p bs of
     CryptoFailed e -> CryptoFailed e
     CryptoPassed (_, sk) ->
         CryptoPassed $ case form of
-            MLDSAKeySeed -> PrivKeyMLDSA_Seed seed sk
-            MLDSAKeyExpanded -> PrivKeyMLDSA_Expanded sk
-            MLDSAKeyBoth -> PrivKeyMLDSA_Both seed sk
+            MLKeySeed -> PrivKeyMLDSA_Seed seed sk
+            MLKeyExpanded -> PrivKeyMLDSA_Expanded sk
+            MLKeyBoth -> PrivKeyMLDSA_Both seed sk
   where
     seed = convert bs :: ScrubbedBytes
 
@@ -210,10 +248,74 @@ privkeyMLDSA_seed (PrivKeyMLDSA_Expanded _) = Nothing
 privkeyMLDSA_seed (PrivKeyMLDSA_Both s _) = Just s
 
 -- | The form the key will be written out in.
-privkeyMLDSA_form :: PrivKeyMLDSA p -> MLDSAKeyForm
-privkeyMLDSA_form (PrivKeyMLDSA_Seed _ _) = MLDSAKeySeed
-privkeyMLDSA_form (PrivKeyMLDSA_Expanded _) = MLDSAKeyExpanded
-privkeyMLDSA_form (PrivKeyMLDSA_Both _ _) = MLDSAKeyBoth
+privkeyMLDSA_form :: PrivKeyMLDSA p -> MLKeyForm
+privkeyMLDSA_form (PrivKeyMLDSA_Seed _ _) = MLKeySeed
+privkeyMLDSA_form (PrivKeyMLDSA_Expanded _) = MLKeyExpanded
+privkeyMLDSA_form (PrivKeyMLDSA_Both _ _) = MLKeyBoth
+
+-- | An ML-KEM private key, kept in the form it was read as, like
+-- 'PrivKeyMLDSA'.  The constructors are not exported.
+data PrivKeyMLKEM p
+    = PrivKeyMLKEM_Seed ScrubbedBytes (MLKEM.DecapsulationKey p)
+    | PrivKeyMLKEM_Expanded (MLKEM.DecapsulationKey p)
+    | PrivKeyMLKEM_Both ScrubbedBytes (MLKEM.DecapsulationKey p)
+
+deriving instance MLKEM.MLKEM p => Eq (PrivKeyMLKEM p)
+
+showsPrivKeyMLKEM
+    :: (ScrubbedBytes -> String)
+    -> (MLKEM.DecapsulationKey p -> String)
+    -> PrivKeyMLKEM p
+    -> String
+showsPrivKeyMLKEM seed key k = case k of
+    PrivKeyMLKEM_Seed s sk -> con "PrivKeyMLKEM_Seed" [seed s, key sk]
+    PrivKeyMLKEM_Expanded sk -> con "PrivKeyMLKEM_Expanded" [key sk]
+    PrivKeyMLKEM_Both s sk -> con "PrivKeyMLKEM_Both" [seed s, key sk]
+  where
+    con name as = unwords (name : map (\a -> "(" ++ a ++ ")") as)
+
+-- | The form is shown; neither the seed nor the key is.
+instance MLKEM.MLKEM p => Show (PrivKeyMLKEM p) where
+    show = showsPrivKeyMLKEM (const "<secret>") show
+
+instance MLKEM.MLKEM p => DebugShow (PrivKeyMLKEM p) where
+    debugShow = showsPrivKeyMLKEM (debugShowBytes "seed") debugShow
+
+-- | Build a key from its seed, to be written back out in the given form.
+privkeyMLKEMFromSeed
+    :: (MLKEM.MLKEM p, ByteArrayAccess ba)
+    => proxy p -> MLKeyForm -> ba -> CryptoFailable (PrivKeyMLKEM p)
+privkeyMLKEMFromSeed p form bs = case MLKEM.keyPairFromSeed p bs of
+    CryptoFailed e -> CryptoFailed e
+    CryptoPassed (_, sk) ->
+        CryptoPassed $ case form of
+            MLKeySeed -> PrivKeyMLKEM_Seed seed sk
+            MLKeyExpanded -> PrivKeyMLKEM_Expanded sk
+            MLKeyBoth -> PrivKeyMLKEM_Both seed sk
+  where
+    seed = convert bs :: ScrubbedBytes
+
+-- | Build a key from the expanded key alone.
+privkeyMLKEMFromKey :: MLKEM.DecapsulationKey p -> PrivKeyMLKEM p
+privkeyMLKEMFromKey = PrivKeyMLKEM_Expanded
+
+-- | The expanded key, whatever form the key is in.
+privkeyMLKEM_key :: PrivKeyMLKEM p -> MLKEM.DecapsulationKey p
+privkeyMLKEM_key (PrivKeyMLKEM_Seed _ sk) = sk
+privkeyMLKEM_key (PrivKeyMLKEM_Expanded sk) = sk
+privkeyMLKEM_key (PrivKeyMLKEM_Both _ sk) = sk
+
+-- | The seed, for a key that has one.
+privkeyMLKEM_seed :: PrivKeyMLKEM p -> Maybe ScrubbedBytes
+privkeyMLKEM_seed (PrivKeyMLKEM_Seed s _) = Just s
+privkeyMLKEM_seed (PrivKeyMLKEM_Expanded _) = Nothing
+privkeyMLKEM_seed (PrivKeyMLKEM_Both s _) = Just s
+
+-- | The form the key will be written out in.
+privkeyMLKEM_form :: PrivKeyMLKEM p -> MLKeyForm
+privkeyMLKEM_form (PrivKeyMLKEM_Seed _ _) = MLKeySeed
+privkeyMLKEM_form (PrivKeyMLKEM_Expanded _) = MLKeyExpanded
+privkeyMLKEM_form (PrivKeyMLKEM_Both _ _) = MLKeyBoth
 
 -- | Private key types known and used in X.509
 data PrivKey
@@ -239,6 +341,12 @@ data PrivKey
       PrivKeyMLDSA65 (PrivKeyMLDSA MLDSA.MLDSA65)
     | -- | ML-DSA-87 private key
       PrivKeyMLDSA87 (PrivKeyMLDSA MLDSA.MLDSA87)
+    | -- | ML-KEM-512 private key
+      PrivKeyMLKEM512 (PrivKeyMLKEM MLKEM.MLKEM512)
+    | -- | ML-KEM-768 private key
+      PrivKeyMLKEM768 (PrivKeyMLKEM MLKEM.MLKEM768)
+    | -- | ML-KEM-1024 private key
+      PrivKeyMLKEM1024 (PrivKeyMLKEM MLKEM.MLKEM1024)
     deriving (Show, Eq)
 
 -- | Rendering a private key with the key material in it, for the times when
@@ -257,6 +365,9 @@ instance DebugShow PrivKey where
         PrivKeyMLDSA44 p -> con "PrivKeyMLDSA44" $ debugShow p
         PrivKeyMLDSA65 p -> con "PrivKeyMLDSA65" $ debugShow p
         PrivKeyMLDSA87 p -> con "PrivKeyMLDSA87" $ debugShow p
+        PrivKeyMLKEM512 p -> con "PrivKeyMLKEM512" $ debugShow p
+        PrivKeyMLKEM768 p -> con "PrivKeyMLKEM768" $ debugShow p
+        PrivKeyMLKEM1024 p -> con "PrivKeyMLKEM1024" $ debugShow p
       where
         con name body = name ++ " (" ++ body ++ ")"
 
@@ -474,6 +585,21 @@ newcurveFromASN1
                 ( "ML-DSA-87"
                 , mldsaFromASN1 (Proxy :: Proxy MLDSA.MLDSA87) PrivKeyMLDSA87 "ML-DSA-87"
                 )
+        getMLDSA [2, 16, 840, 1, 101, 3, 4, 4, 1] =
+            Just
+                ( "ML-KEM-512"
+                , mlkemFromASN1 (Proxy :: Proxy MLKEM.MLKEM512) PrivKeyMLKEM512 "ML-KEM-512"
+                )
+        getMLDSA [2, 16, 840, 1, 101, 3, 4, 4, 2] =
+            Just
+                ( "ML-KEM-768"
+                , mlkemFromASN1 (Proxy :: Proxy MLKEM.MLKEM768) PrivKeyMLKEM768 "ML-KEM-768"
+                )
+        getMLDSA [2, 16, 840, 1, 101, 3, 4, 4, 3] =
+            Just
+                ( "ML-KEM-1024"
+                , mlkemFromASN1 (Proxy :: Proxy MLKEM.MLKEM1024) PrivKeyMLKEM1024 "ML-KEM-1024"
+                )
         getMLDSA _ = Nothing
         isValidVersion version = version >= 0 && version <= 1
 newcurveFromASN1 _ =
@@ -491,10 +617,10 @@ mldsaFromASN1
     -> [ASN1]
     -> Either String PrivKey
 mldsaFromASN1 p con name inner = case inner of
-    [Other Context 0 seed] -> con <$> fromSeed MLDSAKeySeed seed
+    [Other Context 0 seed] -> con <$> fromSeed MLKeySeed seed
     [OctetString expanded] -> con . privkeyMLDSAFromKey <$> fromExpanded expanded
     [Start Sequence, OctetString seed, OctetString expanded, End Sequence] -> do
-        k <- fromSeed MLDSAKeyBoth seed
+        k <- fromSeed MLKeyBoth seed
         sk <- fromExpanded expanded
         if privkeyMLDSA_key k == sk
             then Right (con k)
@@ -506,6 +632,34 @@ mldsaFromASN1 p con name inner = case inner of
         CryptoPassed k -> Right k
         CryptoFailed e -> err ("invalid seed: " ++ show e)
     fromExpanded expanded = case MLDSA.signingKey expanded of
+        CryptoPassed sk -> Right sk
+        CryptoFailed e -> err ("invalid expandedKey: " ++ show e)
+
+-- | The private key of RFC 9935 Section 6, in the same three forms as
+-- 'mldsaFromASN1'.
+mlkemFromASN1
+    :: MLKEM.MLKEM p
+    => proxy p
+    -> (PrivKeyMLKEM p -> PrivKey)
+    -> String
+    -> [ASN1]
+    -> Either String PrivKey
+mlkemFromASN1 p con name inner = case inner of
+    [Other Context 0 seed] -> con <$> fromSeed MLKeySeed seed
+    [OctetString expanded] -> con . privkeyMLKEMFromKey <$> fromExpanded expanded
+    [Start Sequence, OctetString seed, OctetString expanded, End Sequence] -> do
+        k <- fromSeed MLKeyBoth seed
+        sk <- fromExpanded expanded
+        if privkeyMLKEM_key k == sk
+            then Right (con k)
+            else err "seed and expandedKey do not match"
+    _ -> err "unexpected inner format"
+  where
+    err s = Left (name ++ ".DecapsulationKey.fromASN1: " ++ s)
+    fromSeed form seed = case privkeyMLKEMFromSeed p form seed of
+        CryptoPassed k -> Right k
+        CryptoFailed e -> err ("invalid seed: " ++ show e)
+    fromExpanded expanded = case MLKEM.decapsulationKey expanded of
         CryptoPassed sk -> Right sk
         CryptoFailed e -> err ("invalid expandedKey: " ++ show e)
 
@@ -535,6 +689,9 @@ privkeyToASN1 (PrivKeyEd448 k) = newcurveToASN1 [1, 3, 101, 113] k
 privkeyToASN1 (PrivKeyMLDSA44 k) = mldsaToASN1 (getObjectID PubKeyALG_MLDSA44) k
 privkeyToASN1 (PrivKeyMLDSA65 k) = mldsaToASN1 (getObjectID PubKeyALG_MLDSA65) k
 privkeyToASN1 (PrivKeyMLDSA87 k) = mldsaToASN1 (getObjectID PubKeyALG_MLDSA87) k
+privkeyToASN1 (PrivKeyMLKEM512 k) = mlkemToASN1 (getObjectID PubKeyALG_MLKEM512) k
+privkeyToASN1 (PrivKeyMLKEM768 k) = mlkemToASN1 (getObjectID PubKeyALG_MLKEM768) k
+privkeyToASN1 (PrivKeyMLKEM1024 k) = mlkemToASN1 (getObjectID PubKeyALG_MLKEM1024) k
 
 rsaToASN1 :: RSA.PrivateKey -> ASN1S
 rsaToASN1 key =
@@ -657,6 +814,29 @@ mldsaToASN1 oid k =
             , End Sequence
             ]
 
+-- | The inverse of 'mlkemFromASN1'.
+mlkemToASN1 :: MLKEM.MLKEM p => OID -> PrivKeyMLKEM p -> ASN1S
+mlkemToASN1 oid k =
+    (++)
+        [ Start Sequence
+        , IntVal 0
+        , Start Sequence
+        , OID oid
+        , End Sequence
+        , OctetString (encodeASN1' DER inner)
+        , End Sequence
+        ]
+  where
+    inner = case k of
+        PrivKeyMLKEM_Seed s _ -> [Other Context 0 (convert s)]
+        PrivKeyMLKEM_Expanded sk -> [OctetString (convert sk)]
+        PrivKeyMLKEM_Both s sk ->
+            [ Start Sequence
+            , OctetString (convert s)
+            , OctetString (convert sk)
+            , End Sequence
+            ]
+
 mapLeft :: (a0 -> a1) -> Either a0 b -> Either a1 b
 mapLeft f (Left x) = Left (f x)
 mapLeft _ (Right x) = Right x
@@ -674,3 +854,6 @@ privkeyToAlg (PrivKeyEd448 _) = PubKeyALG_Ed448
 privkeyToAlg (PrivKeyMLDSA44 _) = PubKeyALG_MLDSA44
 privkeyToAlg (PrivKeyMLDSA65 _) = PubKeyALG_MLDSA65
 privkeyToAlg (PrivKeyMLDSA87 _) = PubKeyALG_MLDSA87
+privkeyToAlg (PrivKeyMLKEM512 _) = PubKeyALG_MLKEM512
+privkeyToAlg (PrivKeyMLKEM768 _) = PubKeyALG_MLKEM768
+privkeyToAlg (PrivKeyMLKEM1024 _) = PubKeyALG_MLKEM1024
