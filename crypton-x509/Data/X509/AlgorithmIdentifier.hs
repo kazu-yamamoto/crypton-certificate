@@ -63,6 +63,12 @@ data PubKeyALG
       PubKeyALG_MLDSA65
     | -- | ML-DSA-87 signature algorithm (RFC 9881)
       PubKeyALG_MLDSA87
+    | -- | ML-KEM-512 key encapsulation (RFC 9935)
+      PubKeyALG_MLKEM512
+    | -- | ML-KEM-768 key encapsulation (RFC 9935)
+      PubKeyALG_MLKEM768
+    | -- | ML-KEM-1024 key encapsulation (RFC 9935)
+      PubKeyALG_MLKEM1024
     | -- | Diffie Hellman Public Key algorithm
       PubKeyALG_DH
     | -- | Unknown Public Key algorithm
@@ -139,6 +145,9 @@ instance OIDable PubKeyALG where
     getObjectID PubKeyALG_MLDSA44 = [2, 16, 840, 1, 101, 3, 4, 3, 17]
     getObjectID PubKeyALG_MLDSA65 = [2, 16, 840, 1, 101, 3, 4, 3, 18]
     getObjectID PubKeyALG_MLDSA87 = [2, 16, 840, 1, 101, 3, 4, 3, 19]
+    getObjectID PubKeyALG_MLKEM512 = [2, 16, 840, 1, 101, 3, 4, 4, 1]
+    getObjectID PubKeyALG_MLKEM768 = [2, 16, 840, 1, 101, 3, 4, 4, 2]
+    getObjectID PubKeyALG_MLKEM1024 = [2, 16, 840, 1, 101, 3, 4, 4, 3]
     getObjectID PubKeyALG_DH = [1, 2, 840, 10046, 2, 1]
     getObjectID (PubKeyALG_Unknown oid) = oid
 

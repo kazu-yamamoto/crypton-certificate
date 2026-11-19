@@ -56,7 +56,9 @@ library
 test-suite test-x509
     type:             exitcode-stdio-1.0
     main-is:          Tests.hs
-    other-modules:    MLDSAKeys
+    other-modules:
+        MLDSAKeys
+        MLKEMKeys
     hs-source-dirs:   Tests
     default-language: Haskell2010
     ghc-options:      -Wall -fno-warn-orphans -fno-warn-missing-signatures

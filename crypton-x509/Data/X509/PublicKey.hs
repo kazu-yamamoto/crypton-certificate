@@ -1,3 +1,5 @@
+{-# LANGUAGE TypeApplications #-}
+
 -- |
 -- Module      : Data.X509.PublicKey
 -- License     : BSD-style
@@ -44,6 +46,7 @@ import qualified Crypto.PubKey.ECC.Types as ECC
 import qualified Crypto.PubKey.Ed25519 as Ed25519
 import qualified Crypto.PubKey.Ed448 as Ed448
 import qualified Crypto.PubKey.MLDSA as MLDSA
+import qualified Crypto.PubKey.MLKEM as MLKEM
 import qualified Crypto.PubKey.RSA.Types as RSA
 import Data.Word
 
@@ -118,6 +121,12 @@ data PubKey
       PubKeyMLDSA65 (MLDSA.VerificationKey MLDSA.MLDSA65)
     | -- | ML-DSA-87 public key
       PubKeyMLDSA87 (MLDSA.VerificationKey MLDSA.MLDSA87)
+    | -- | ML-KEM-512 public key
+      PubKeyMLKEM512 (MLKEM.EncapsulationKey MLKEM.MLKEM512)
+    | -- | ML-KEM-768 public key
+      PubKeyMLKEM768 (MLKEM.EncapsulationKey MLKEM.MLKEM768)
+    | -- | ML-KEM-1024 public key
+      PubKeyMLKEM1024 (MLKEM.EncapsulationKey MLKEM.MLKEM1024)
     | -- | unrecognized format
       PubKeyUnknown OID B.ByteString
     deriving (Show, Eq)
@@ -255,6 +264,21 @@ instance ASN1Object PubKey where
             case xs of
                 End Sequence : BitString bits : End Sequence : xs2 -> decodeCF "ML-DSA-87" PubKeyMLDSA87 bits xs2 MLDSA.verificationKey
                 _ -> Left ("fromASN1: X509.PubKey: unknown ML-DSA-87 format: " ++ show xs)
+        | pkalg == getObjectID PubKeyALG_MLKEM512 =
+            case xs of
+                End Sequence : BitString bits : End Sequence : xs2 ->
+                    decodeCF "ML-KEM-512" PubKeyMLKEM512 bits xs2 (MLKEM.encapsulationKey @MLKEM.MLKEM512)
+                _ -> Left ("fromASN1: X509.PubKey: unknown ML-KEM-512 format: " ++ show xs)
+        | pkalg == getObjectID PubKeyALG_MLKEM768 =
+            case xs of
+                End Sequence : BitString bits : End Sequence : xs2 ->
+                    decodeCF "ML-KEM-768" PubKeyMLKEM768 bits xs2 (MLKEM.encapsulationKey @MLKEM.MLKEM768)
+                _ -> Left ("fromASN1: X509.PubKey: unknown ML-KEM-768 format: " ++ show xs)
+        | pkalg == getObjectID PubKeyALG_MLKEM1024 =
+            case xs of
+                End Sequence : BitString bits : End Sequence : xs2 ->
+                    decodeCF "ML-KEM-1024" PubKeyMLKEM1024 bits xs2 (MLKEM.encapsulationKey @MLKEM.MLKEM1024)
+                _ -> Left ("fromASN1: X509.PubKey: unknown ML-KEM-1024 format: " ++ show xs)
         -- parameters of unknown algorithms are not kept
         | otherwise = case dropParams (0 :: Int) xs of
             BitString bits : End Sequence : xs2 ->
@@ -311,6 +335,9 @@ pubkeyToAlg (PubKeyEd448 _) = PubKeyALG_Ed448
 pubkeyToAlg (PubKeyMLDSA44 _) = PubKeyALG_MLDSA44
 pubkeyToAlg (PubKeyMLDSA65 _) = PubKeyALG_MLDSA65
 pubkeyToAlg (PubKeyMLDSA87 _) = PubKeyALG_MLDSA87
+pubkeyToAlg (PubKeyMLKEM512 _) = PubKeyALG_MLKEM512
+pubkeyToAlg (PubKeyMLKEM768 _) = PubKeyALG_MLKEM768
+pubkeyToAlg (PubKeyMLKEM1024 _) = PubKeyALG_MLKEM1024
 pubkeyToAlg (PubKeyUnknown oid _) = PubKeyALG_Unknown oid
 
 encodePK :: PubKey -> [ASN1]
@@ -378,6 +405,12 @@ encodePK key = asn1Container Sequence (encodeInner key)
     encodeInner (PubKeyMLDSA65 pubkey) =
         asn1Container Sequence [pkalg] ++ [BitString $ toBitArray (convert pubkey) 0]
     encodeInner (PubKeyMLDSA87 pubkey) =
+        asn1Container Sequence [pkalg] ++ [BitString $ toBitArray (convert pubkey) 0]
+    encodeInner (PubKeyMLKEM512 pubkey) =
+        asn1Container Sequence [pkalg] ++ [BitString $ toBitArray (convert pubkey) 0]
+    encodeInner (PubKeyMLKEM768 pubkey) =
+        asn1Container Sequence [pkalg] ++ [BitString $ toBitArray (convert pubkey) 0]
+    encodeInner (PubKeyMLKEM1024 pubkey) =
         asn1Container Sequence [pkalg] ++ [BitString $ toBitArray (convert pubkey) 0]
     encodeInner (PubKeyDH k) =
         asn1Container Sequence ([pkalg] ++ params) ++ [BitString $ toBitArray bits 0]
