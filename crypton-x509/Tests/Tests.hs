@@ -1010,6 +1010,14 @@ property_multi_valued_rdn =
     encode dn = toASN1 dn []
     decode l = fromASN1 l :: Either String (DistinguishedName, [ASN1])
 
+-- Every DnElement maps to a distinct OID and back.
+property_dn_element_oid :: Bool
+property_dn_element_oid =
+    all (\e -> fromObjectID (getObjectID e) == Just e) els
+        && length (nub (map getObjectID els)) == length els
+  where
+    els = [minBound .. maxBound] :: [DnElement]
+
 -- Non-default PSS parameters are kept, explicit defaults are normalized,
 -- and trailer fields other than 1 are rejected.
 property_pss_params :: Bool
@@ -1180,6 +1188,7 @@ main =
                     , testProperty "PSS default parameters" property_pss_default
                     , testProperty "PSS parameters" property_pss_params
                     , testProperty "multi-valued RDN" property_multi_valued_rdn
+                    , testProperty "DN element OID" property_dn_element_oid
                     , testProperty "DH public key" property_dh_pubkey
                     , testProperty "EC private key length" property_ec_privkey_length
                     , testProperty "EC curve name" property_ec_curve_name

@@ -71,7 +71,37 @@ data DnElement
       DnOrganizationUnit
     | -- | Email Address (legacy)
       DnEmailAddress
-    deriving (Show, Eq)
+    | -- | L
+      DnLocality
+    | -- | ST
+      DnStateOrProvince
+    | -- | Street address
+      DnStreetAddress
+    | -- | Postal code
+      DnPostalCode
+    | -- | Serial number
+      DnSerialNumber
+    | -- | Title
+      DnTitle
+    | -- | Name
+      DnName
+    | -- | Surname
+      DnSurname
+    | -- | Given name
+      DnGivenName
+    | -- | Initials
+      DnInitials
+    | -- | Generation qualifier
+      DnGenerationQualifier
+    | -- | DN qualifier
+      DnQualifier
+    | -- | Pseudonym
+      DnPseudonym
+    | -- | DC
+      DnDomainComponent
+    | -- | UID
+      DnUserId
+    deriving (Show, Eq, Enum, Bounded)
 
 instance OIDable DnElement where
     getObjectID DnCommonName = [2, 5, 4, 3]
@@ -79,6 +109,24 @@ instance OIDable DnElement where
     getObjectID DnOrganization = [2, 5, 4, 10]
     getObjectID DnOrganizationUnit = [2, 5, 4, 11]
     getObjectID DnEmailAddress = [1, 2, 840, 113549, 1, 9, 1]
+    getObjectID DnLocality = [2, 5, 4, 7]
+    getObjectID DnStateOrProvince = [2, 5, 4, 8]
+    getObjectID DnStreetAddress = [2, 5, 4, 9]
+    getObjectID DnPostalCode = [2, 5, 4, 17]
+    getObjectID DnSerialNumber = [2, 5, 4, 5]
+    getObjectID DnTitle = [2, 5, 4, 12]
+    getObjectID DnName = [2, 5, 4, 41]
+    getObjectID DnSurname = [2, 5, 4, 4]
+    getObjectID DnGivenName = [2, 5, 4, 42]
+    getObjectID DnInitials = [2, 5, 4, 43]
+    getObjectID DnGenerationQualifier = [2, 5, 4, 44]
+    getObjectID DnQualifier = [2, 5, 4, 46]
+    getObjectID DnPseudonym = [2, 5, 4, 65]
+    getObjectID DnDomainComponent = [0, 9, 2342, 19200300, 100, 1, 25]
+    getObjectID DnUserId = [0, 9, 2342, 19200300, 100, 1, 1]
+
+instance OIDNameable DnElement where
+    fromObjectID oid = lookup oid [(getObjectID e, e) | e <- [minBound .. maxBound]]
 
 -- | Try to get a specific element in a 'DistinguishedName' structure
 getDnElement :: DnElement -> DistinguishedName -> Maybe ASN1CharacterString
