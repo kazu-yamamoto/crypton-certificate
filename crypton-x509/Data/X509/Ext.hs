@@ -1,5 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE ViewPatterns #-}
 
 -- |
 -- Module      : Data.X509.Ext
@@ -20,7 +22,10 @@ module Data.X509.Ext (
     ExtKeyUsagePurpose (..),
     ExtSubjectKeyId (..),
     ExtSubjectAltName (..),
-    ExtAuthorityKeyId (..),
+    ExtAuthorityKeyId (ExtAuthorityKeyId),
+    defaultExtAuthorityKeyId,
+    akiKeyIdentifier,
+    akiIssuerSerial,
     ExtCrlDistributionPoints (..),
     ExtNetscapeComment (..),
     ExtNameConstraints (..),
@@ -257,28 +262,54 @@ instance Extension ExtSubjectAltName where
     extEncode (ExtSubjectAltName names) = encodeGeneralNames names
     extDecode l = runParseASN1 (ExtSubjectAltName <$> parseGeneralNames) l
 
--- | Provide a mean to identify the public key corresponding to the private key
--- used to signed a certificate.
-data ExtAuthorityKeyId = ExtAuthorityKeyId B.ByteString
+-- | Authority key identifier (RFC 5280 4.2.1.1).  The constructor is
+-- hidden; use 'defaultExtAuthorityKeyId' and record update syntax.
+data ExtAuthorityKeyId = ExtAuthorityKeyId_
+    { akiKeyIdentifier :: Maybe B.ByteString
+    -- ^ keyIdentifier
+    , akiIssuerSerial :: Maybe ([AltName], Integer)
+    -- ^ authorityCertIssuer and authorityCertSerialNumber
+    }
     deriving (Show, Eq)
+
+-- | No fields.
+defaultExtAuthorityKeyId :: ExtAuthorityKeyId
+defaultExtAuthorityKeyId = ExtAuthorityKeyId_ Nothing Nothing
+
+-- | An identifier with a keyIdentifier.  Constructing sets only the
+-- keyIdentifier.
+pattern ExtAuthorityKeyId :: B.ByteString -> ExtAuthorityKeyId
+pattern ExtAuthorityKeyId keyid <- ExtAuthorityKeyId_ (Just keyid) _
+    where
+        ExtAuthorityKeyId keyid = ExtAuthorityKeyId_ (Just keyid) Nothing
 
 instance Extension ExtAuthorityKeyId where
     extOID _ = [2, 5, 29, 35]
     extHasNestedASN1 = const True
-    extEncode (ExtAuthorityKeyId keyid) =
-        [Start Sequence, Other Context 0 keyid, End Sequence]
-
-    -- authorityCertIssuer and authorityCertSerialNumber are not kept
-    extDecode (Start Sequence : Other Context 0 keyid : rest)
-        | issuerSerial rest = Right $ ExtAuthorityKeyId keyid
-      where
-        issuerSerial [End Sequence] = True
-        issuerSerial (Start (Container Context 1) : xs) =
-            case dropWhile (/= End (Container Context 1)) xs of
-                _ : [Other Context 2 _, End Sequence] -> True
-                _ -> False
-        issuerSerial _ = False
-    extDecode _ = Left "unknown sequence"
+    extEncode (ExtAuthorityKeyId_ keyid issuerSerial) =
+        [Start Sequence]
+            ++ maybe [] (\k -> [Other Context 0 k]) keyid
+            ++ maybe
+                []
+                ( \(names, serial) ->
+                    asn1Container (Container Context 1) (concatMap encodeAltName names)
+                        ++ [Other Context 2 (intContent serial)]
+                )
+                issuerSerial
+            ++ [End Sequence]
+    extDecode = runParseASN1 $ onNextContainer Sequence $ do
+        keyid <- getNextMaybe $ \x -> case x of
+            Other Context 0 k -> Just k
+            _ -> Nothing
+        names <- onNextContainerMaybe (Container Context 1) (getMany getAddr)
+        serial <- getNextMaybe $ \x -> case x of
+            Other Context 2 n -> Just n
+            _ -> Nothing
+        issuerSerial <- case (names, serial) of
+            (Nothing, Nothing) -> return Nothing
+            (Just ns, Just n) -> either throwParseError (\i -> return $ Just (ns, i)) (implicitInt n)
+            _ -> throwParseError "AuthorityKeyIdentifier: issuer and serial must be together"
+        return $ ExtAuthorityKeyId_ keyid issuerSerial
 
 -- | Identify how CRL information is obtained
 data ExtCrlDistributionPoints = ExtCrlDistributionPoints [DistributionPoint]
@@ -586,13 +617,6 @@ encodeGeneralSubtree (GeneralSubtree base minimum' maximum') =
         ++ (if minimum' /= 0 then [Other Context 0 (intContent minimum')] else [])
         ++ maybe [] (\m -> [Other Context 1 (intContent m)]) maximum'
         ++ [End Sequence]
-  where
-    -- the content octets of an IMPLICIT INTEGER (two's complement)
-    intContent = B.pack . go
-      where
-        go i
-            | i >= -128 && i < 128 = [fromIntegral i]
-            | otherwise = go (i `shiftR` 8) ++ [fromIntegral (i .&. 0xff)]
 
 --------------------------------------------------------------------------------
 -- Decoding
@@ -653,9 +677,17 @@ decodeGeneralSubtree _ =
     Left "GeneralSubtree: invalid ASN1"
 
 -- | Decode the content octets of an IMPLICIT INTEGER.
+-- | The content octets of an IMPLICIT INTEGER (two's complement).
+intContent :: Integer -> B.ByteString
+intContent = B.pack . go
+  where
+    go i
+        | i >= -128 && i < 128 = [fromIntegral i]
+        | otherwise = go (i `shiftR` 8) ++ [fromIntegral (i .&. 0xff)]
+
 implicitInt :: B.ByteString -> Either String Integer
 implicitInt bs
-    | B.null bs = Left "GeneralSubtree: empty integer"
+    | B.null bs = Left "empty integer"
     | otherwise = Right $ B.foldl' (\a w -> a * 256 + fromIntegral w) sign bs
   where
     sign = if testBit (B.head bs) 7 then -1 else 0

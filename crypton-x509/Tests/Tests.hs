@@ -509,6 +509,12 @@ instance Arbitrary ExtNameConstraints where
 instance Arbitrary ExtSubjectAltName where
     arbitrary = ExtSubjectAltName <$> arbitrary
 
+instance Arbitrary ExtAuthorityKeyId where
+    arbitrary = do
+        k <- oneof [pure Nothing, Just . B.pack <$> listOf1 arbitrary]
+        is <- oneof [pure Nothing, curry Just <$> listOf1 arbitrary <*> arbitrary]
+        return defaultExtAuthorityKeyId{akiKeyIdentifier = k, akiIssuerSerial = is}
+
 instance Arbitrary DistributionPoint where
     arbitrary =
         oneof
@@ -784,18 +790,28 @@ property_basic_constraints_no_ca =
 
 property_aki_issuer_serial :: Bool
 property_aki_issuer_serial =
-    extDecode
-        ( [Start Sequence, Other Context 0 kid, Start (Container Context 1)]
-            ++ [Start (Container Context 4)]
-            ++ toASN1
-                (DistinguishedName [(getObjectID DnCommonName, asn1CharacterString UTF8 "x")])
-                []
-            ++ [End (Container Context 4), End (Container Context 1)]
-            ++ [Other Context 2 (B.pack [1]), End Sequence]
-        )
-        == Right (ExtAuthorityKeyId kid)
+    extDecode (aki [Other Context 0 kid] ++ issuer ++ serial ++ [End Sequence])
+        == Right full
+        && extDecode (aki issuer ++ serial ++ [End Sequence])
+            == Right full{akiKeyIdentifier = Nothing}
+        && isLeft'
+            (extDecode (aki issuer ++ [End Sequence]) :: Either String ExtAuthorityKeyId)
+        && case full of
+            ExtAuthorityKeyId k -> k == kid
+            _ -> False
   where
     kid = B.pack [1, 2, 3]
+    dn = DistinguishedName [(getObjectID DnCommonName, asn1CharacterString UTF8 "x")]
+    aki = (Start Sequence :)
+    issuer =
+        [Start (Container Context 1), Start (Container Context 4)]
+            ++ toASN1 dn [End (Container Context 4), End (Container Context 1)]
+    serial = [Other Context 2 (B.pack [0x80])]
+    full =
+        defaultExtAuthorityKeyId
+            { akiKeyIdentifier = Just kid
+            , akiIssuerSerial = Just ([AltNameDN dn], -128)
+            }
 
 -- RSASSA-PSS keys (with parameters) and other unknown keys are kept as
 -- PubKeyUnknown.
@@ -1098,6 +1114,9 @@ main =
                     , testProperty
                         "subject-alt-name"
                         (property_extension_id :: ExtSubjectAltName -> Bool)
+                    , testProperty
+                        "authority-key-id"
+                        (property_extension_id :: ExtAuthorityKeyId -> Bool)
                     , testProperty
                         "crl-distribution-points"
                         (property_extension_id :: ExtCrlDistributionPoints -> Bool)
