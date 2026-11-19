@@ -11,6 +11,8 @@ module Certificate (
     hashSHA256,
     hashSHA384,
     hashSHA512,
+    hashSHA3_256,
+    hashSHA3_384,
 
     -- * Key and signature utilities
     Alg (..),
@@ -79,6 +81,11 @@ hashSHA224 = GHash HashSHA224 SHA224
 hashSHA256 = GHash HashSHA256 SHA256
 hashSHA384 = GHash HashSHA384 SHA384
 hashSHA512 = GHash HashSHA512 SHA512
+
+hashSHA3_256 :: GHash SHA3_256
+hashSHA3_384 :: GHash SHA3_384
+hashSHA3_256 = GHash HashSHA3_256 SHA3_256
+hashSHA3_384 = GHash HashSHA3_384 SHA3_384
 
 -- | Signature and hash algorithms instantiated with parameters.
 data Alg pub priv where

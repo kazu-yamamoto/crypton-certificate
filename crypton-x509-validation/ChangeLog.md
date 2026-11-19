@@ -10,6 +10,8 @@
   [#57](https://github.com/kazu-yamamoto/crypton-certificate/pull/57)
 * Support RSASSA-PSS keys
   [#61](https://github.com/kazu-yamamoto/crypton-certificate/pull/61)
+* Support SHA-3 signature algorithms
+  [#62](https://github.com/kazu-yamamoto/crypton-certificate/pull/62)
 
 ## 1.10.3
 

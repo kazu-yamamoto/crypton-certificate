@@ -93,7 +93,16 @@ arbitraryKeyPSS =
             <*> choose (0, 64)
         ]
   where
-    hash = elements [HashSHA1, HashSHA224, HashSHA256, HashSHA384, HashSHA512]
+    hash =
+        elements
+            [ HashSHA1
+            , HashSHA224
+            , HashSHA256
+            , HashSHA384
+            , HashSHA512
+            , HashSHA3_256
+            , HashSHA3_512
+            ]
 
 arbitraryDH :: Gen PubKeyDH
 arbitraryDH = do
@@ -163,7 +172,18 @@ arbitraryPrivMLDSA p = do
 instance Arbitrary HashALG where
     arbitrary =
         elements
-            [HashMD2, HashMD5, HashSHA1, HashSHA224, HashSHA256, HashSHA384, HashSHA512]
+            [ HashMD2
+            , HashMD5
+            , HashSHA1
+            , HashSHA224
+            , HashSHA256
+            , HashSHA384
+            , HashSHA512
+            , HashSHA3_224
+            , HashSHA3_256
+            , HashSHA3_384
+            , HashSHA3_512
+            ]
 
 instance Arbitrary PubKeyALG where
     arbitrary = elements [PubKeyALG_RSA, PubKeyALG_DSA, PubKeyALG_EC, PubKeyALG_DH]
@@ -188,6 +208,18 @@ instance Arbitrary SignatureALG where
             , SignatureALG HashSHA256 PubKeyALG_EC
             , SignatureALG HashSHA384 PubKeyALG_EC
             , SignatureALG HashSHA512 PubKeyALG_EC
+            , SignatureALG HashSHA3_224 PubKeyALG_RSA
+            , SignatureALG HashSHA3_256 PubKeyALG_RSA
+            , SignatureALG HashSHA3_384 PubKeyALG_RSA
+            , SignatureALG HashSHA3_512 PubKeyALG_RSA
+            , SignatureALG HashSHA3_224 PubKeyALG_DSA
+            , SignatureALG HashSHA3_256 PubKeyALG_DSA
+            , SignatureALG HashSHA3_384 PubKeyALG_DSA
+            , SignatureALG HashSHA3_512 PubKeyALG_DSA
+            , SignatureALG HashSHA3_224 PubKeyALG_EC
+            , SignatureALG HashSHA3_256 PubKeyALG_EC
+            , SignatureALG HashSHA3_384 PubKeyALG_EC
+            , SignatureALG HashSHA3_512 PubKeyALG_EC
             , SignatureALG_IntrinsicHash PubKeyALG_Ed25519
             , SignatureALG_IntrinsicHash PubKeyALG_Ed448
             , SignatureALG_IntrinsicHash PubKeyALG_MLDSA44
@@ -1182,11 +1214,14 @@ property_extension_id e = case extDecode (extEncode e) of
 -- Per-family AlgorithmIdentifier parameters contract:
 -- ECDSA (RFC 5758 3.2, RFC 3279 2.2.3) and DSA (RFC 5758 3.1, RFC 3279
 -- 2.2.2) omit the parameters field; RSA PKCS#1 v1.5 encodes an ASN.1
--- NULL (RFC 3279 2.2.1); EdDSA omits the field (RFC 8410 3).
+-- NULL (RFC 3279 2.2.1) except with SHA-3 (RFC 9688 3.1); EdDSA omits
+-- the field (RFC 8410 3).
 property_sig_alg_parameters :: SignatureALG -> Bool
-property_sig_alg_parameters alg@(SignatureALG _ pub)
+property_sig_alg_parameters alg@(SignatureALG h pub)
     | pub == PubKeyALG_EC || pub == PubKeyALG_DSA = Null `notElem` toASN1 alg []
-    | pub == PubKeyALG_RSA = Null `elem` toASN1 alg []
+    | pub == PubKeyALG_RSA = (Null `elem` toASN1 alg []) == (h `notElem` sha3)
+  where
+    sha3 = [HashSHA3_224, HashSHA3_256, HashSHA3_384, HashSHA3_512]
 property_sig_alg_parameters alg@(SignatureALG_IntrinsicHash _) =
     Null `notElem` toASN1 alg []
 property_sig_alg_parameters _ = True

@@ -164,6 +164,10 @@ verifySignature' (SignatureALG hashALG pubkeyALG) pubkey cdata signature
     rsaVerify HashSHA256 = rsaVerifyWith SHA256
     rsaVerify HashSHA384 = rsaVerifyWith SHA384
     rsaVerify HashSHA512 = rsaVerifyWith SHA512
+    rsaVerify HashSHA3_224 = rsaVerifyWith SHA3_224
+    rsaVerify HashSHA3_256 = rsaVerifyWith SHA3_256
+    rsaVerify HashSHA3_384 = rsaVerifyWith SHA3_384
+    rsaVerify HashSHA3_512 = rsaVerifyWith SHA3_512
     rsaVerifyWith h key msg = RSA.verifyDigest key (hashWith h msg)
 verifySignature' (SignatureALG_IntrinsicHash pubkeyALG) pubkey cdata signature
     | pubkeyToAlg pubkey == pubkeyALG = doVerify pubkey
@@ -225,6 +229,10 @@ withPSSHash HashSHA224 f = f SHA224
 withPSSHash HashSHA256 f = f SHA256
 withPSSHash HashSHA384 f = f SHA384
 withPSSHash HashSHA512 f = f SHA512
+withPSSHash HashSHA3_224 f = f SHA3_224
+withPSSHash HashSHA3_256 f = f SHA3_256
+withPSSHash HashSHA3_384 f = f SHA3_384
+withPSSHash HashSHA3_512 f = f SHA3_512
 withPSSHash _ _ = Nothing
 
 verifyECDSA :: HashALG -> PubKeyEC -> Maybe (ByteString -> ByteString -> Bool)
@@ -250,3 +258,7 @@ verifyECDSA hashALG key =
     ecdsaVerify HashSHA256 = ECDSA.verify SHA256
     ecdsaVerify HashSHA384 = ECDSA.verify SHA384
     ecdsaVerify HashSHA512 = ECDSA.verify SHA512
+    ecdsaVerify HashSHA3_224 = ECDSA.verify SHA3_224
+    ecdsaVerify HashSHA3_256 = ECDSA.verify SHA3_256
+    ecdsaVerify HashSHA3_384 = ECDSA.verify SHA3_384
+    ecdsaVerify HashSHA3_512 = ECDSA.verify SHA3_512
