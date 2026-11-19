@@ -30,6 +30,8 @@ X9.42 DH, RSASSA-PSS and ML-KEM keys and SHA-3 signatures are supported.
   [#62](https://github.com/kazu-yamamoto/crypton-certificate/pull/62)
 * Support ML-KEM keys
   [#63](https://github.com/kazu-yamamoto/crypton-certificate/pull/63)
+* Encode NULL parameters for RSA with SHA-3
+  [#64](https://github.com/kazu-yamamoto/crypton-certificate/pull/64)
 
 ## 1.10.3
 
