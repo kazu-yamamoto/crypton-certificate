@@ -31,7 +31,12 @@ module Data.X509.Ext (
     ExtNameConstraints (..),
     GeneralSubtree (..),
     AltName (..),
-    DistributionPoint (..),
+    DistributionPoint,
+    defaultDistributionPoint,
+    dpName,
+    dpReasons,
+    dpCRLIssuer,
+    DistributionPointName (..),
     ReasonFlag (..),
 
     -- * Accessor turning extension into a specific one
@@ -52,7 +57,7 @@ import Data.Bits (bit, shiftR, testBit, (.&.), (.|.))
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Char8 as BC
 import Data.List (find)
-import Data.Maybe (catMaybes)
+import Data.Maybe (isNothing)
 import Data.Proxy
 import Data.X509.DistinguishedName
 import Data.X509.ExtensionRaw
@@ -328,10 +333,26 @@ data ReasonFlag
     | Reason_AACompromise
     deriving (Show, Eq, Ord, Enum)
 
--- | Distribution point as either some GeneralNames or a DN
-data DistributionPoint
+-- | Distribution point (RFC 5280 4.2.1.13).  The constructor is hidden;
+-- use 'defaultDistributionPoint' and record update syntax.
+data DistributionPoint = DistributionPoint_
+    { dpName :: Maybe DistributionPointName
+    -- ^ distributionPoint
+    , dpReasons :: Maybe [ReasonFlag]
+    -- ^ reasons
+    , dpCRLIssuer :: Maybe [AltName]
+    -- ^ cRLIssuer
+    }
+    deriving (Show, Eq)
+
+-- | No fields.  A distribution point needs a name or a CRL issuer.
+defaultDistributionPoint :: DistributionPoint
+defaultDistributionPoint = DistributionPoint_ Nothing Nothing Nothing
+
+-- | The name of a distribution point.
+data DistributionPointName
     = DistributionPointFullName [AltName]
-    | DistributionNameRelative DistinguishedName
+    | DistributionPointRelativeName RelativeDistinguishedName
     deriving (Show, Eq)
 
 instance Extension ExtCrlDistributionPoints where
@@ -340,42 +361,57 @@ instance Extension ExtCrlDistributionPoints where
     extEncode (ExtCrlDistributionPoints dps) =
         asn1Container Sequence $ concatMap encodeDP dps
       where
-        encodeDP dp = asn1Container Sequence $ asn1Container (Container Context 0) $ case dp of
-            DistributionPointFullName names ->
-                asn1Container (Container Context 0) $ concatMap encodeAltName names
-            DistributionNameRelative (DistinguishedName els) ->
-                asn1Container (Container Context 1) $
-                    concat [asn1Container Sequence [OID o, ASN1String v] | (o, v) <- els]
+        encodeDP (DistributionPoint_ name rs issuer) =
+            asn1Container Sequence $
+                maybe [] (asn1Container (Container Context 0) . encodeName) name
+                    ++ maybe [] (\r -> [Other Context 1 (bitsContent (flagsToBits r))]) rs
+                    ++ maybe
+                        []
+                        (asn1Container (Container Context 2) . concatMap encodeAltName)
+                        issuer
+        encodeName (DistributionPointFullName names) =
+            asn1Container (Container Context 0) $ concatMap encodeAltName names
+        encodeName (DistributionPointRelativeName rdn) =
+            asn1Container (Container Context 1) $
+                concat [asn1Container Sequence [OID o, ASN1String v] | (o, v) <- rdn]
+        bitsContent bits =
+            B.cons
+                (fromIntegral $ (8 - bitArrayLength bits `mod` 8) `mod` 8)
+                (bitArrayGetData bits)
     extDecode = runParseASN1 (ExtCrlDistributionPoints <$> parseDPs)
       where
         parseDPs = onNextContainer Sequence $ do
             dps <- getMany parseDP
             when (null dps) $ throwParseError "CRLDistributionPoints: empty"
-            return $ catMaybes dps
-        -- only the distribution point name is kept: reasons and cRLIssuer
-        -- are dropped, and so are points without a name
+            return dps
         parseDP = onNextContainer Sequence $ do
             name <- onNextContainerMaybe (Container Context 0) parseName
-            _ <- getNextMaybe reasons
-            _ <- onNextContainerMaybe (Container Context 2) (getMany getAddr)
-            return name
+            rs <- getNextMaybe reasons
+            rs' <- maybe (return Nothing) (fmap Just . either throwParseError return) rs
+            issuer <- onNextContainerMaybe (Container Context 2) (getMany getAddr)
+            when (isNothing name && isNothing issuer) $
+                throwParseError "DistributionPoint: no name or CRL issuer"
+            return $ DistributionPoint_ name rs' issuer
         parseName = do
-            full <-
-                onNextContainerMaybe (Container Context 0) (getMany getAddr)
+            full <- onNextContainerMaybe (Container Context 0) (getMany getAddr)
             case full of
                 Just names -> return $ DistributionPointFullName names
                 Nothing ->
                     maybe (throwParseError "DistributionPoint: unknown name") return
                         =<< onNextContainerMaybe
                             (Container Context 1)
-                            (DistributionNameRelative . DistinguishedName <$> getMany parseATV)
+                            (DistributionPointRelativeName <$> getMany parseATV)
         parseATV = onNextContainer Sequence $ do
             o <- getNext
             v <- getNext
             case (o, v) of
                 (OID oid, ASN1String str) -> return (oid, str)
                 _ -> throwParseError "DistributionPoint: invalid attribute"
-        reasons (Other Context 1 _) = Just ()
+        reasons (Other Context 1 bs) = Just $ case B.uncons bs of
+            Just (unused, d)
+                | unused < 8 && not (B.null d && unused /= 0) ->
+                    Right $ bitsToFlags Reason_AACompromise (toBitArray d (fromIntegral unused))
+            _ -> Left "DistributionPoint: invalid reasons"
         reasons _ = Nothing
 
 parseGeneralNames :: ParseASN1 [AltName]

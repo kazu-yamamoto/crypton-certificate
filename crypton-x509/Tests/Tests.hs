@@ -515,12 +515,27 @@ instance Arbitrary ExtAuthorityKeyId where
         is <- oneof [pure Nothing, curry Just <$> listOf1 arbitrary <*> arbitrary]
         return defaultExtAuthorityKeyId{akiKeyIdentifier = k, akiIssuerSerial = is}
 
-instance Arbitrary DistributionPoint where
+instance Arbitrary DistributionPointName where
     arbitrary =
         oneof
             [ DistributionPointFullName <$> listOf1 arbitrary
-            , DistributionNameRelative <$> arbitrary
+            , DistributionPointRelativeName . concat . getRDNs
+                <$> arbitrary `suchThat` (not . null . getRDNs)
             ]
+
+instance Arbitrary DistributionPoint where
+    arbitrary = do
+        name <- oneof [pure Nothing, Just <$> arbitrary]
+        rs <-
+            oneof
+                [ pure Nothing
+                , Just . nub . sort <$> listOf1 (elements [Reason_Unused .. Reason_AACompromise])
+                ]
+        issuer <- case name of
+            Nothing -> Just <$> listOf1 arbitrary
+            Just _ -> oneof [pure Nothing, Just <$> listOf1 arbitrary]
+        return
+            defaultDistributionPoint{dpName = name, dpReasons = rs, dpCRLIssuer = issuer}
 
 instance Arbitrary ExtCrlDistributionPoints where
     arbitrary = ExtCrlDistributionPoints <$> listOf1 arbitrary
@@ -1038,24 +1053,38 @@ property_pss_params =
             ++ [End Sequence, End Sequence]
 
 -- The usual form (as written by OpenSSL), and points with reasons and a
--- cRLIssuer, whose name only is kept, or without a name, which are dropped.
+-- cRLIssuer, or with a cRLIssuer only, are kept; a point with neither a
+-- name nor a cRLIssuer is rejected.
 property_crl_dp_der :: Bool
 property_crl_dp_der =
-    extensionDecode (ExtensionRaw [2, 5, 29, 31] False der)
-        == Just
-            (Right (ExtCrlDistributionPoints [DistributionPointFullName [AltNameURI url]]))
-        && extEncodeBs
-            (ExtCrlDistributionPoints [DistributionPointFullName [AltNameURI url]])
-            == der
+    extensionDecode (ExtensionRaw [2, 5, 29, 31] False der) == Just (Right simple)
+        && extEncodeBs simple == der
         && extDecode
             ( [Start Sequence]
                 ++ dp (uriName ++ [Other Context 1 (B.pack [6, 0x40])] ++ issuer)
                 ++ dp issuer
                 ++ [End Sequence]
             )
-            == Right (ExtCrlDistributionPoints [DistributionPointFullName [AltNameURI url]])
+            == Right
+                ( ExtCrlDistributionPoints
+                    [ uriDP
+                        { dpReasons = Just [Reason_KeyCompromise]
+                        , dpCRLIssuer = Just [AltNameDNS "a"]
+                        }
+                    , defaultDistributionPoint{dpCRLIssuer = Just [AltNameDNS "a"]}
+                    ]
+                )
+        && isLeft'
+            ( extDecode ([Start Sequence] ++ dp [] ++ [End Sequence])
+                :: Either String ExtCrlDistributionPoints
+            )
   where
     url = "http://crl.example.com/ca.crl"
+    uriDP =
+        defaultDistributionPoint
+            { dpName = Just (DistributionPointFullName [AltNameURI url])
+            }
+    simple = ExtCrlDistributionPoints [uriDP]
     der =
         B.pack
             ( [0x30, 0x25, 0x30, 0x23, 0xa0, 0x21, 0xa0, 0x1f, 0x86, 0x1d]
