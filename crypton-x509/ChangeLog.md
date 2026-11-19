@@ -14,6 +14,8 @@
   [#58](https://github.com/kazu-yamamoto/crypton-certificate/pull/58)
 * Keep all fields of DistributionPoint
   [#59](https://github.com/kazu-yamamoto/crypton-certificate/pull/59)
+* Add more DnElement attributes
+  [#60](https://github.com/kazu-yamamoto/crypton-certificate/pull/60)
 
 ## 1.10.3
 
