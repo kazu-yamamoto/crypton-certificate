@@ -96,6 +96,8 @@ dhPublicKey p g q y = PubKeyDH_ p g q Nothing Nothing y
 data PubKey
     = -- | RSA public key
       PubKeyRSA RSA.PublicKey
+    | -- | RSASSA-PSS public key, restricted to the parameters if any
+      PubKeyRSAPSS RSA.PublicKey (Maybe PSSParams)
     | -- | DSA public key
       PubKeyDSA DSA.PublicKey
     | -- | X9.42 DH public key
@@ -133,6 +135,12 @@ instance ASN1Object PubKey where
             case removeNull xs of
                 End Sequence : BitString bits : End Sequence : xs2 -> decodeASN1Err "RSA" bits xs2 (toPubKeyRSA . rsaPubFromASN1)
                 _ -> Left ("fromASN1: X509.PubKey: unknown RSA format: " ++ show xs)
+        | pkalg == getObjectID PubKeyALG_RSAPSS = do
+            (mp, ys) <- pssKeyParamsFromASN1 xs
+            case ys of
+                BitString bits : End Sequence : xs2 ->
+                    decodeASN1Err "RSA-PSS" bits xs2 (toPubKeyRSAPSS mp . rsaPubFromASN1)
+                _ -> Left ("fromASN1: X509.PubKey: unknown RSA-PSS format: " ++ show xs)
         | pkalg == getObjectID PubKeyALG_DSA =
             case xs of
                 Start Sequence : IntVal p : IntVal q : IntVal g : End Sequence : End Sequence
@@ -270,6 +278,7 @@ instance ASN1Object PubKey where
                     Right _ ->
                         Left ("fromASN1: X509.PubKey " ++ format ++ " bitarray has trailing data")
         toPubKeyRSA = either Left (\(rsaKey, r) -> Right (PubKeyRSA rsaKey, r))
+        toPubKeyRSAPSS mp = either Left (\(rsaKey, r) -> Right (PubKeyRSAPSS rsaKey mp, r))
 
         bitArrayToPoint = SerializedPoint . bitArrayGetData
 
@@ -291,6 +300,7 @@ instance ASN1Object PubKey where
 -- | Convert a Public key to the Public Key Algorithm type
 pubkeyToAlg :: PubKey -> PubKeyALG
 pubkeyToAlg (PubKeyRSA _) = PubKeyALG_RSA
+pubkeyToAlg (PubKeyRSAPSS _ _) = PubKeyALG_RSAPSS
 pubkeyToAlg (PubKeyDSA _) = PubKeyALG_DSA
 pubkeyToAlg (PubKeyDH _) = PubKeyALG_DH
 pubkeyToAlg (PubKeyEC _) = PubKeyALG_EC
@@ -309,6 +319,10 @@ encodePK key = asn1Container Sequence (encodeInner key)
     pkalg = OID $ getObjectID $ pubkeyToAlg key
     encodeInner (PubKeyRSA pubkey) =
         asn1Container Sequence [pkalg, Null] ++ [BitString $ toBitArray bits 0]
+      where
+        bits = encodeASN1' DER $ rsaPubToASN1 pubkey []
+    encodeInner (PubKeyRSAPSS pubkey mp) =
+        pssKeyAlgToASN1 mp [BitString $ toBitArray bits 0]
       where
         bits = encodeASN1' DER $ rsaPubToASN1 pubkey []
     encodeInner (PubKeyDSA pubkey) =

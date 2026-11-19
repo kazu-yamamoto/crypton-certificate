@@ -84,7 +84,7 @@ import Data.ASN1.Types
 import qualified Data.ByteArray as BA
 import qualified Data.ByteString as B
 
-import Data.X509.AlgorithmIdentifier
+import Data.X509.AlgorithmIdentifier hiding (pssKeyAlgToASN1, pssKeyParamsFromASN1)
 import Data.X509.CRL
 import Data.X509.Cert
 import Data.X509.CertificateChain

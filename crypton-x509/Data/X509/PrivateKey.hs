@@ -219,6 +219,8 @@ privkeyMLDSA_form (PrivKeyMLDSA_Both _ _) = MLDSAKeyBoth
 data PrivKey
     = -- | RSA private key
       PrivKeyRSA RSA.PrivateKey
+    | -- | RSASSA-PSS private key, restricted to the parameters if any
+      PrivKeyRSAPSS RSA.PrivateKey (Maybe PSSParams)
     | -- | DSA private key
       PrivKeyDSA DSA.PrivateKey
     | -- | EC private key
@@ -245,6 +247,7 @@ data PrivKey
 instance DebugShow PrivKey where
     debugShow k = case k of
         PrivKeyRSA p -> con "PrivKeyRSA" $ debugShow p
+        PrivKeyRSAPSS p mp -> con "PrivKeyRSAPSS" (debugShow p ++ ") (" ++ show mp)
         PrivKeyDSA p -> con "PrivKeyDSA" $ debugShow p
         PrivKeyEC p -> con "PrivKeyEC" $ debugShow p
         PrivKeyX25519 p -> con "PrivKeyX25519" $ debugShow p
@@ -264,6 +267,7 @@ instance ASN1Object PrivKey where
 privkeyFromASN1 :: [ASN1] -> Either String (PrivKey, [ASN1])
 privkeyFromASN1 asn1 =
     (mapFst PrivKeyRSA <$> rsaFromASN1 asn1)
+        <!> rsaPSSFromASN1 asn1
         <!> (mapFst PrivKeyDSA <$> dsaFromASN1 asn1)
         <!> (mapFst PrivKeyEC <$> ecdsaFromASN1 asn1)
         <!> newcurveFromASN1 asn1
@@ -303,6 +307,21 @@ rsaFromASN1
       where
         failure = ("rsaFromASN1: " ++)
 rsaFromASN1 _ = Left "rsaFromASN1: unexpected format"
+
+-- | PKCS #8 RSASSA-PSS key (RFC 4055).
+rsaPSSFromASN1 :: [ASN1] -> Either String (PrivKey, [ASN1])
+rsaPSSFromASN1 (Start Sequence : IntVal 0 : Start Sequence : OID oid : xs)
+    | oid == getObjectID PubKeyALG_RSAPSS = do
+        (mp, ys) <- pssKeyParamsFromASN1 xs
+        case ys of
+            OctetString bytes : End Sequence : as -> do
+                asn1 <- mapLeft ("rsaPSSFromASN1: " ++) (safeDecode $ decodeASN1' BER bytes)
+                case rsaFromASN1 asn1 of
+                    Right (k, []) -> Right (PrivKeyRSAPSS k mp, as)
+                    Right _ -> Left "rsaPSSFromASN1: trailing data"
+                    Left err -> Left err
+            _ -> Left "rsaPSSFromASN1: unexpected format"
+rsaPSSFromASN1 _ = Left "rsaPSSFromASN1: unexpected format"
 
 dsaFromASN1 :: [ASN1] -> Either String (DSA.PrivateKey, [ASN1])
 dsaFromASN1
@@ -502,6 +521,11 @@ primitiveWithTag _ xs = (Nothing, xs)
 
 privkeyToASN1 :: PrivKey -> ASN1S
 privkeyToASN1 (PrivKeyRSA rsa) = rsaToASN1 rsa
+privkeyToASN1 (PrivKeyRSAPSS rsa mp) =
+    (++) $
+        Start Sequence
+            : IntVal 0
+            : pssKeyAlgToASN1 mp [OctetString (encodeASN1' DER (rsaToASN1 rsa [])), End Sequence]
 privkeyToASN1 (PrivKeyDSA dsa) = dsaToASN1 dsa
 privkeyToASN1 (PrivKeyEC ecdsa) = ecdsaToASN1 ecdsa
 privkeyToASN1 (PrivKeyX25519 k) = newcurveToASN1 [1, 3, 101, 110] k
@@ -640,6 +664,7 @@ mapLeft _ (Right x) = Right x
 -- | Convert a Private key to the Public Key Algorithm type
 privkeyToAlg :: PrivKey -> PubKeyALG
 privkeyToAlg (PrivKeyRSA _) = PubKeyALG_RSA
+privkeyToAlg (PrivKeyRSAPSS _ _) = PubKeyALG_RSAPSS
 privkeyToAlg (PrivKeyDSA _) = PubKeyALG_DSA
 privkeyToAlg (PrivKeyEC _) = PubKeyALG_EC
 privkeyToAlg (PrivKeyX25519 _) = PubKeyALG_X25519

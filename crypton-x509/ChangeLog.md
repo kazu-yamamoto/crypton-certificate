@@ -16,6 +16,8 @@
   [#59](https://github.com/kazu-yamamoto/crypton-certificate/pull/59)
 * Add more DnElement attributes
   [#60](https://github.com/kazu-yamamoto/crypton-certificate/pull/60)
+* Support RSASSA-PSS keys
+  [#61](https://github.com/kazu-yamamoto/crypton-certificate/pull/61)
 
 ## 1.10.3
 

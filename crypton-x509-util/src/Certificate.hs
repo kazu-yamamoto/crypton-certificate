@@ -111,6 +111,7 @@ showCertSmall signedCert = do
     putStrLn ("valid:  " ++ formatValidity (X509.certValidity cert))
     case X509.certPubKey cert of
         X509.PubKeyRSA pubkey -> printf "public key: RSA (%d bits)\n" (RSA.public_size pubkey * 8)
+        X509.PubKeyRSAPSS pubkey _ -> printf "public key: RSA-PSS (%d bits)\n" (RSA.public_size pubkey * 8)
         X509.PubKeyDSA pubkey -> printf "public key: DSA\n"
         X509.PubKeyEC (PubKeyEC_Named name _) -> printf "public key: ECDSA (curve %s)\n" (show name)
         X509.PubKeyEC _ -> printf "public key: ECDSA (explicit curve)\n"
@@ -145,6 +146,12 @@ showCert signedCert = do
             printf "  len    : %d bits\n" (RSA.public_size pubkey * 8)
             printf "  modulus: %x\n" (RSA.public_n pubkey)
             printf "  e      : %x\n" (RSA.public_e pubkey)
+        X509.PubKeyRSAPSS pubkey params -> do
+            putStrLn "public key RSA-PSS:"
+            printf "  len    : %d bits\n" (RSA.public_size pubkey * 8)
+            printf "  modulus: %x\n" (RSA.public_n pubkey)
+            printf "  e      : %x\n" (RSA.public_e pubkey)
+            printf "  params : %s\n" (show params)
         X509.PubKeyDSA pubkey -> do
             let params = DSA.public_params pubkey
             putStrLn "public key DSA:"
@@ -403,6 +410,8 @@ doKeyMain files = do
         case privkey of
             [X509.PrivKeyRSA k] ->
                 putStrLn "RSA KEY" >> putStrLn (showRSAKey k)
+            [X509.PrivKeyRSAPSS k _] ->
+                putStrLn "RSA-PSS KEY" >> putStrLn (showRSAKey k)
             [X509.PrivKeyDSA k] ->
                 putStrLn "DSA KEY" >> putStrLn (showDSAKey k)
             [X509.PrivKeyEC k] ->

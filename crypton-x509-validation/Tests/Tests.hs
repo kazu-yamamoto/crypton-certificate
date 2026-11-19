@@ -858,6 +858,17 @@ testPSSParams = testCase "RSA-PSS parameters" $ do
         msg
         sig
         @?= SignatureFailed SignatureInvalid
+    -- RSASSA-PSS keys restrict the parameters (RFC 4055 3.3)
+    let restricted p = PubKeyRSAPSS pub (Just p)
+        custom = (defaultPSSParams HashSHA384){pssMGFHash = HashSHA256, pssSaltLength = 0}
+    verifySignature alg (PubKeyRSAPSS pub Nothing) msg sig @?= SignaturePass
+    verifySignature alg (restricted custom) msg sig @?= SignaturePass
+    verifySignature alg (restricted (defaultPSSParams HashSHA384)) msg sig
+        @?= SignatureFailed SignaturePubkeyMismatch
+    verifySignature alg (restricted custom{pssMGFHash = HashSHA384}) msg sig
+        @?= SignatureFailed SignaturePubkeyMismatch
+    verifySignature (SignatureALG HashSHA384 PubKeyALG_RSA) (PubKeyRSAPSS pub Nothing) msg sig
+        @?= SignatureFailed SignaturePubkeyMismatch
 
 -- | Validity period around the current date.
 currentValidity :: IO (DateTime, DateTime)

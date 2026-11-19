@@ -8,6 +8,8 @@
   [#52](https://github.com/kazu-yamamoto/crypton-certificate/pull/52)
 * Keep all GeneralName forms
   [#57](https://github.com/kazu-yamamoto/crypton-certificate/pull/57)
+* Support RSASSA-PSS keys
+  [#61](https://github.com/kazu-yamamoto/crypton-certificate/pull/61)
 
 ## 1.10.3
 
