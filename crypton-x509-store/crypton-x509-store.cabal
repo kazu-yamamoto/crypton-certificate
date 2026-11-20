@@ -35,7 +35,7 @@ library
         bytestring,
         containers,
         crypton >=1.1.0 && <2.4,
-        crypton-asn1-encoding >=0.10.0 && <0.11,
+        crypton-asn1-encoding >=0.10.0 && <0.12,
         crypton-asn1-types >=0.4.1 && <0.5,
         crypton-pem >=0.2.4 && <0.4,
         crypton-x509 >=1.11 && <1.12,
